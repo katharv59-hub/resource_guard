@@ -18,12 +18,11 @@ window headerbar,
 window.background headerbar,
 .main-headerbar,
 headerbar.main-headerbar {
-    background: #0b111a !important;
-    background-color: #0b111a !important;
-    background-image: none !important;
-    box-shadow: none !important;
-    border-bottom: 1px solid #1e293b !important;
-    color: #f8fafc !important;
+    background-color: #0b111a;
+    background-image: none;
+    box-shadow: none;
+    border-bottom: 1px solid #1e293b;
+    color: #f8fafc;
     min-height: 52px;
     padding: 0 16px;
 }
@@ -34,19 +33,17 @@ window headerbar:backdrop,
 window.background headerbar:backdrop,
 .main-headerbar:backdrop,
 headerbar.main-headerbar:backdrop {
-    background: #0b111a !important;
-    background-color: #0b111a !important;
-    background-image: none !important;
-    box-shadow: none !important;
-    border-bottom: 1px solid #1e293b !important;
-    color: #cbd5e1 !important;
+    background-color: #0b111a;
+    background-image: none;
+    box-shadow: none;
+    border-bottom: 1px solid #1e293b;
+    color: #cbd5e1;
 }
 
 headerbar windowhandle,
 .main-headerbar windowhandle {
-    background: transparent !important;
-    background-color: transparent !important;
-    background-image: none !important;
+    background-color: transparent;
+    background-image: none;
 }
 
 headerbar .header-title,
@@ -54,7 +51,7 @@ headerbar .title,
 .main-headerbar .title {
     font-weight: 700;
     font-size: 16px;
-    color: #ffffff !important;
+    color: #ffffff;
     letter-spacing: 0.3px;
 }
 
@@ -63,21 +60,21 @@ headerbar .subtitle,
 .main-headerbar .subtitle {
     font-size: 12px;
     font-weight: 600;
-    color: #38bdf8 !important;
+    color: #38bdf8;
 }
 
 headerbar windowcontrols button {
-    color: #cbd5e1 !important;
+    color: #cbd5e1;
 }
 
 headerbar windowcontrols button:hover {
-    color: #ffffff !important;
-    background-color: #1e293b !important;
+    color: #ffffff;
+    background-color: #1e293b;
 }
 
 headerbar windowcontrols button.close:hover {
-    color: #ffffff !important;
-    background-color: #ef4444 !important;
+    color: #ffffff;
+    background-color: #ef4444;
 }
 
 /* Sidebar navigation */
