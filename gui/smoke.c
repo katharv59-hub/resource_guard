@@ -457,9 +457,11 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
+    char expected_ver[64];
+    snprintf(expected_ver, sizeof(expected_ver), "State: v%lu", (unsigned long)model->state_version);
     const char *ver_text = gtk_label_get_text(GTK_LABEL(dw->badge_version));
-    if (!strstr(ver_text, "v2")) {
-        fprintf(stderr, "FAIL: Dashboard version badge did not display updated version v2 (got '%s').\n", ver_text);
+    if (strcmp(ver_text, expected_ver) != 0) {
+        fprintf(stderr, "FAIL: Dashboard version badge did not display updated version '%s' (got '%s').\n", expected_ver, ver_text);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
