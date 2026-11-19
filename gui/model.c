@@ -2,6 +2,10 @@
  * Pure C11 model owning BankerState lifecycle, draft validation,
  * scenario loading, and safety queries. */
 
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "model.h"
 #include <stdio.h>
 #include <stdlib.h>

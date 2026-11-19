@@ -2,6 +2,10 @@
  * Validates state lifecycle, listener preservation, monotonic versioning,
  * draft persistence, Need derivation, scenario loading, and safety evaluation. */
 
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "model.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,16 +18,26 @@
 #define RMDIR(d) _rmdir(d)
 int _putenv(const char *string);
 char *_fullpath(char *absPath, const char *relPath, size_t maxLength);
-static void set_test_env(const char *key_val) {
-    _putenv(key_val);
+static void set_test_env(const char *name, const char *val) {
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s=%s", name, val ? val : "");
+    _putenv(buf);
+}
+static void clear_test_env(const char *name) {
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s=", name);
+    _putenv(buf);
 }
 #else
 #include <sys/stat.h>
 #include <unistd.h>
 #define MKDIR(d) mkdir(d, 0755)
 #define RMDIR(d) rmdir(d)
-static void set_test_env(const char *key_val) {
-    putenv((char *)key_val);
+static void set_test_env(const char *name, const char *val) {
+    setenv(name, val ? val : "", 1);
+}
+static void clear_test_env(const char *name) {
+    unsetenv(name);
 }
 #endif
 
@@ -414,9 +428,7 @@ static void test_resource_lookup_order_and_unrelated_cwd(void) {
     assert(strlen(resolved) > 0);
 
     /* Test environment variable override */
-    static char env_buf[256];
-    snprintf(env_buf, sizeof(env_buf), "RESOURCEGUARD_SCENARIOS_DIR=tests/scenarios");
-    set_test_env(env_buf);
+    set_test_env("RESOURCEGUARD_SCENARIOS_DIR", "tests/scenarios");
 
     char resolved_env[512] = {0};
     bool ok_env = gui_model_resolve_resource_path("demo.txt", resolved_env, sizeof(resolved_env));
@@ -429,7 +441,7 @@ static void test_resource_lookup_order_and_unrelated_cwd(void) {
     assert(resolved_bad[0] == '\0');
 
     /* Clear environment variable */
-    set_test_env("RESOURCEGUARD_SCENARIOS_DIR=");
+    clear_test_env("RESOURCEGUARD_SCENARIOS_DIR");
 
     printf("  -> Passed (lookup order verified, environment overrides work, non-existent rejected).\n");
     fflush(stdout);
@@ -478,7 +490,7 @@ static void test_demo_fallback_metadata_and_invalid_demo_rejection(void) {
     fclose(f);
 
     /* Direct scenario lookup to test_tmp folder */
-    set_test_env("RESOURCEGUARD_SCENARIOS_DIR=tests/scenarios/test_tmp");
+    set_test_env("RESOURCEGUARD_SCENARIOS_DIR", "tests/scenarios/test_tmp");
 
     GuiModel m;
     gui_model_init(&m);
@@ -501,7 +513,7 @@ static void test_demo_fallback_metadata_and_invalid_demo_rejection(void) {
     /* Cleanup temporary file, folder, and environment override */
     remove("tests/scenarios/test_tmp/demo.txt");
     RMDIR("tests/scenarios/test_tmp");
-    set_test_env("RESOURCEGUARD_SCENARIOS_DIR=");
+    clear_test_env("RESOURCEGUARD_SCENARIOS_DIR");
 
     printf("  -> Passed (invalid demo rejected, built-in baseline metadata verified).\n");
     fflush(stdout);
