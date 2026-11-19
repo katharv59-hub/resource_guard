@@ -454,10 +454,13 @@ static void test_absolute_scenario_path(void) {
     char abs_path[512] = {0};
 #if defined(_WIN32)
     char *res = _fullpath(abs_path, "tests/scenarios/demo.txt", sizeof(abs_path));
-#else
-    char *res = realpath("tests/scenarios/demo.txt", abs_path);
-#endif
     assert(res != NULL);
+#else
+    char *res = realpath("tests/scenarios/demo.txt", NULL);
+    assert(res != NULL);
+    snprintf(abs_path, sizeof(abs_path), "%s", res);
+    free(res);
+#endif
 
     GuiModel m;
     gui_model_init(&m);
@@ -482,11 +485,10 @@ static void test_demo_fallback_metadata_and_invalid_demo_rejection(void) {
     MKDIR("tests/scenarios/test_tmp");
     FILE *f = fopen("tests/scenarios/test_tmp/demo.txt", "w");
     assert(f != NULL);
-    fprintf(f, "2 2\n");
-    fprintf(f, "10 10\n");      /* Total */
-    fprintf(f, "0 0\n");        /* Available */
-    fprintf(f, "10 10\n0 0\n"); /* Allocation: P0 Alloc is [10, 10] */
-    fprintf(f, "5 5\n0 0\n");   /* Maximum: P0 Max is [5, 5] -> Alloc > Max! */
+    fprintf(f, "processes 2\nresources 2\n");
+    fprintf(f, "total 10 10\navailable 0 0\n");
+    fprintf(f, "allocation\n10 10\n0 0\n");
+    fprintf(f, "max\n5 5\n0 0\n");
     fclose(f);
 
     /* Direct scenario lookup to test_tmp folder */

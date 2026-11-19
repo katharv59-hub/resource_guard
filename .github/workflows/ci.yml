@@ -171,7 +171,7 @@ jobs:
 
       - name: Upload GTK4 Application Screenshot
         uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: gtk4-app-screenshot
           path: screenshot.png
