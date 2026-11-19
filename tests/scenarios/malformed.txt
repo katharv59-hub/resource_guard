@@ -1,0 +1,4 @@
+processes 2
+resources 2
+total 5 5
+bogus 1

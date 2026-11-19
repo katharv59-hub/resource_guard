@@ -1,0 +1,65 @@
+CC     = gcc
+WARN   = -Wall -Wextra -Wpedantic -Wshadow
+CFLAGS = -std=c11 -g -O2 $(WARN) -Iengine
+ENGINE = engine/banker.c engine/scenario.c
+HDRS   = engine/banker.h
+
+# Threading module (POSIX threads — Linux only)
+THREAD = engine/threading.c
+THDR   = engine/threading.h
+
+all: banker_cli test_banker
+
+banker_cli: cli/main.c $(ENGINE) $(HDRS)
+	$(CC) $(CFLAGS) cli/main.c $(ENGINE) -o $@
+
+test_banker: tests/test_banker.c $(ENGINE) $(HDRS)
+	$(CC) $(CFLAGS) tests/test_banker.c $(ENGINE) -o $@
+
+# Run from the project root: tests load tests/scenarios/*.txt
+test: test_banker
+	./test_banker
+
+# Undefined behaviour (can run separately from AddressSanitizer)
+ubsan:
+	$(CC) $(CFLAGS) -O1 -fsanitize=undefined -fno-sanitize-recover=all tests/test_banker.c $(ENGINE) -o test_banker_ubsan
+	./test_banker_ubsan
+
+# Memory errors and undefined behaviour
+sanitize:
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all tests/test_banker.c $(ENGINE) -o test_banker_asan
+	./test_banker_asan
+
+demo: banker_cli
+	./banker_cli tests/scenarios/demo.txt
+
+# --- Threading targets (Linux only, requires -pthread) ---
+
+test_threading: tests/test_threading.c $(ENGINE) $(THREAD) $(HDRS) $(THDR)
+	$(CC) $(CFLAGS) -pthread tests/test_threading.c $(ENGINE) $(THREAD) -o $@
+
+test_threads: test_threading
+	./test_threading
+
+test_threads_ubsan:
+	$(CC) $(CFLAGS) -O1 -pthread -fsanitize=undefined -fno-sanitize-recover=all \
+		tests/test_threading.c $(ENGINE) $(THREAD) -o test_threading_ubsan
+	./test_threading_ubsan
+
+# ThreadSanitizer (separate from UBSan — TSan is incompatible with ASan)
+tsan:
+	$(CC) $(CFLAGS) -O1 -pthread -fsanitize=thread -fno-sanitize-recover=all \
+		tests/test_threading.c $(ENGINE) $(THREAD) -o test_threading_tsan
+	./test_threading_tsan
+
+test_threads_sanitize:
+	$(CC) $(CFLAGS) -pthread -fsanitize=address,undefined -fno-sanitize-recover=all \
+		tests/test_threading.c $(ENGINE) $(THREAD) -o test_threading_asan
+	./test_threading_asan
+
+clean:
+	rm -f banker_cli test_banker test_banker_asan test_banker_ubsan \
+	      test_threading test_threading_asan test_threading_ubsan test_threading_tsan
+
+.PHONY: all test ubsan sanitize demo clean \
+        test_threads test_threads_ubsan tsan test_threads_sanitize

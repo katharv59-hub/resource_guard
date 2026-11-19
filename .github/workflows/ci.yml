@@ -1,0 +1,76 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Show compiler version
+        run: gcc --version
+
+      # ---- Banker engine (Baseline verification) ----
+
+      - name: Build engine and CLI
+        run: make
+
+      - name: Run Banker test suite
+        run: make test
+
+      - name: Banker UndefinedBehaviorSanitizer
+        run: make ubsan
+
+      - name: Banker AddressSanitizer + UBSan
+        run: make sanitize
+
+      # ---- Threading module (POSIX threads) ----
+
+      - name: Run threading tests
+        run: make test_threads
+
+      - name: Threading UndefinedBehaviorSanitizer
+        run: make test_threads_ubsan
+
+      # ---- Sanitizer capability probes & executions ----
+      # A minimal capability probe verifies whether the toolchain and runner
+      # environment support the sanitizer runtime.
+      # If the probe succeeds, the project build and test must pass unconditionally;
+      # no compilation error, runtime sanitizer error, or test failure is masked.
+
+      - name: Probe ThreadSanitizer capability
+        id: tsan_probe
+        run: |
+          if echo 'int main(void){return 0;}' | gcc -pthread -fsanitize=thread -x c - -o /tmp/tsan_probe 2>/dev/null && /tmp/tsan_probe 2>/dev/null; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+            echo "ThreadSanitizer runtime is supported."
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ThreadSanitizer runtime unavailable on runner (probe failed). Skipping tsan."
+          fi
+          rm -f /tmp/tsan_probe
+
+      - name: Run ThreadSanitizer tests
+        if: steps.tsan_probe.outputs.supported == 'true'
+        run: make tsan
+
+      - name: Probe AddressSanitizer capability
+        id: asan_probe
+        run: |
+          if echo 'int main(void){return 0;}' | gcc -pthread -fsanitize=address,undefined -x c - -o /tmp/asan_probe 2>/dev/null && /tmp/asan_probe 2>/dev/null; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+            echo "AddressSanitizer runtime is supported."
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AddressSanitizer runtime unavailable on runner (probe failed). Skipping asan."
+          fi
+          rm -f /tmp/asan_probe
+
+      - name: Run AddressSanitizer threading tests
+        if: steps.asan_probe.outputs.supported == 'true'
+        run: make test_threads_sanitize

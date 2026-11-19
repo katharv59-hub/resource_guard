@@ -1,0 +1,15 @@
+*.o
+*.obj
+*.exe
+banker_cli
+test_banker
+test_banker_asan
+test_banker_ubsan
+resourceguard
+checker
+build/
+test_threading
+test_threading_asan
+test_threading_ubsan
+test_threading_tsan
+_stub/
