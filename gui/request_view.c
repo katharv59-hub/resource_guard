@@ -102,7 +102,7 @@ static void update_process_context(SimulatorWidgets *w) {
     for (int j = 0; j < m; j++) {
         if (w->lbl_res_context[j]) {
             char ctx_buf[128];
-            snprintf(ctx_buf, sizeof(ctx_buf), "Need: %d | Avail: %d", need[j], w->model->current_state.available[j]);
+            snprintf(ctx_buf, sizeof(ctx_buf), "Need: %d | Avail: %d", all_need[pid][j], w->model->current_state.available[j]);
             gtk_label_set_text(GTK_LABEL(w->lbl_res_context[j]), ctx_buf);
         }
     }
