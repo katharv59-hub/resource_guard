@@ -6,14 +6,30 @@ window.background {
     color: #e2e8f0;
 }
 
+window headerbar,
+window headerbar.titlebar,
+window.background headerbar,
 headerbar {
-    background-color: #111927;
-    border-bottom: 1px solid #222f44;
+    background-color: #0b111a;
+    background-image: none;
+    box-shadow: none;
+    border-bottom: 1px solid #1e293b;
     color: #f8fafc;
     min-height: 52px;
     padding: 0 16px;
 }
 
+window headerbar:backdrop,
+window headerbar.titlebar:backdrop,
+window.background headerbar:backdrop,
+headerbar:backdrop {
+    background-color: #0b111a;
+    background-image: none;
+    box-shadow: none;
+    color: #cbd5e1;
+}
+
+window headerbar .title,
 headerbar .title {
     font-weight: 700;
     font-size: 16px;
@@ -21,10 +37,11 @@ headerbar .title {
     letter-spacing: 0.3px;
 }
 
+window headerbar .subtitle,
 headerbar .subtitle {
     font-size: 12px;
-    font-weight: 500;
-    color: #93c5fd;
+    font-weight: 600;
+    color: #38bdf8;
 }
 
 /* Sidebar navigation */

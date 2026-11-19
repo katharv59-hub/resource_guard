@@ -37,44 +37,60 @@ void gui_model_init(GuiModel *m) {
 
 void gui_model_init_demo(GuiModel *m) {
     if (!m) return;
-    gui_model_init(m);
 
-    /* Standard Banker 5x3 demonstration baseline */
+    /* Preserve existing listener and advance state version monotonically */
+    GuiModelChangeListener saved_listener = m->listener;
+    void *saved_user_data = m->listener_user_data;
+    uint64_t next_version = m->state_version + 1;
+
+    memset(m, 0, sizeof(*m));
+    m->listener = saved_listener;
+    m->listener_user_data = saved_user_data;
+    m->state_version = next_version;
+
+    /* Try to load authoritative scenario file if present on disk */
+    char parse_err[256] = {0};
     BankerState s;
-    banker_init(&s, 5, 3);
+    bool loaded_from_file = banker_load_scenario("tests/scenarios/demo.txt", &s, parse_err, sizeof(parse_err));
 
-    s.total[0] = 10; s.total[1] = 5; s.total[2] = 7;
-    s.available[0] = 3; s.available[1] = 3; s.available[2] = 2;
+    if (!loaded_from_file) {
+        /* Fall back to built-in demonstration configuration */
+        banker_init(&s, 5, 3);
+        s.total[0] = 10; s.total[1] = 5; s.total[2] = 7;
+        s.available[0] = 3; s.available[1] = 3; s.available[2] = 2;
 
-    int alloc[5][3] = {
-        {0, 1, 0},
-        {2, 0, 0},
-        {3, 0, 2},
-        {2, 1, 1},
-        {0, 0, 2}
-    };
-    int max_dem[5][3] = {
-        {7, 5, 3},
-        {3, 2, 2},
-        {9, 0, 2},
-        {2, 2, 2},
-        {4, 3, 3}
-    };
+        int alloc[5][3] = {
+            {0, 1, 0},
+            {2, 0, 0},
+            {3, 0, 2},
+            {2, 1, 1},
+            {0, 0, 2}
+        };
+        int max_dem[5][3] = {
+            {7, 5, 3},
+            {3, 2, 2},
+            {9, 0, 2},
+            {2, 2, 2},
+            {4, 3, 3}
+        };
 
-    for (int i = 0; i < 5; i++) {
-        for (int j = 0; j < 3; j++) {
-            s.alloc[i][j] = alloc[i][j];
-            s.max[i][j] = max_dem[i][j];
+        for (int i = 0; i < 5; i++) {
+            for (int j = 0; j < 3; j++) {
+                s.alloc[i][j] = alloc[i][j];
+                s.max[i][j] = max_dem[i][j];
+            }
         }
+        m->scenario_path[0] = '\0';
+        snprintf(m->scenario_name, sizeof(m->scenario_name), "Built-in Demo Baseline (5 procs, 3 res)");
+    } else {
+        snprintf(m->scenario_path, sizeof(m->scenario_path), "tests/scenarios/demo.txt");
+        snprintf(m->scenario_name, sizeof(m->scenario_name), "demo.txt (5 procs, 3 res)");
     }
 
     m->current_state = s;
     m->original_state = s;
     m->draft_state = s;
     m->is_loaded = true;
-    m->state_version = 1;
-    snprintf(m->scenario_path, sizeof(m->scenario_path), "demo.txt");
-    snprintf(m->scenario_name, sizeof(m->scenario_name), "demo.txt (5 procs, 3 res)");
 
     gui_model_validate_draft(m);
     notify_change(m);
@@ -111,7 +127,7 @@ bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_
         return false;
     }
 
-    /* Valid scenario loaded: commit to model */
+    /* Valid scenario loaded: commit to model and increment state version */
     m->current_state = loaded;
     m->original_state = loaded;
     m->draft_state = loaded;

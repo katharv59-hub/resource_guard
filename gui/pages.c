@@ -394,6 +394,25 @@ static void update_validation_display(ResourcesWidgets *w) {
     }
 }
 
+/* Update derived Need matrix using the engine's authoritative banker_need */
+static void update_need_display(ResourcesWidgets *w) {
+    if (!w || !w->model) return;
+    int need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+    gui_model_get_draft_need(w->model, need);
+
+    int n = w->model->draft_state.n;
+    int m = w->model->draft_state.m;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < m; j++) {
+            if (w->label_need[i][j]) {
+                char n_buf[32];
+                snprintf(n_buf, sizeof(n_buf), "%d", need[i][j]);
+                gtk_label_set_text(GTK_LABEL(w->label_need[i][j]), n_buf);
+            }
+        }
+    }
+}
+
 static void on_alloc_cell_changed(GtkSpinButton *spin, gpointer user_data) {
     ResourcesWidgets *w = (ResourcesWidgets *)user_data;
     if (w->updating_ui) return;
@@ -404,14 +423,8 @@ static void on_alloc_cell_changed(GtkSpinButton *spin, gpointer user_data) {
 
     gui_model_set_draft_alloc(w->model, p, r, val);
 
-    /* Update derived Need cell */
-    int need_val = w->model->draft_state.max[p][r] - val;
-    char n_buf[32];
-    snprintf(n_buf, sizeof(n_buf), "%d", need_val);
-    if (w->label_need[p][r]) {
-        gtk_label_set_text(GTK_LABEL(w->label_need[p][r]), n_buf);
-    }
-
+    /* Update derived Need matrix via authoritative banker_need */
+    update_need_display(w);
     update_validation_display(w);
 }
 
@@ -425,14 +438,8 @@ static void on_max_cell_changed(GtkSpinButton *spin, gpointer user_data) {
 
     gui_model_set_draft_max(w->model, p, r, val);
 
-    /* Update derived Need cell */
-    int need_val = val - w->model->draft_state.alloc[p][r];
-    char n_buf[32];
-    snprintf(n_buf, sizeof(n_buf), "%d", need_val);
-    if (w->label_need[p][r]) {
-        gtk_label_set_text(GTK_LABEL(w->label_need[p][r]), n_buf);
-    }
-
+    /* Update derived Need matrix via authoritative banker_need */
+    update_need_display(w);
     update_validation_display(w);
 }
 
@@ -570,16 +577,14 @@ static void rebuild_matrix_grids(ResourcesWidgets *w) {
         gtk_grid_attach(GTK_GRID(w->grid_need), hdr, 0, i + 1, 1, 1);
 
         for (int j = 0; j < m; j++) {
-            int need_val = w->model->draft_state.max[i][j] - w->model->draft_state.alloc[i][j];
-            char n_buf[32];
-            snprintf(n_buf, sizeof(n_buf), "%d", need_val);
-            w->label_need[i][j] = gtk_label_new(n_buf);
+            w->label_need[i][j] = gtk_label_new("-");
             gtk_widget_add_css_class(w->label_need[i][j], "need-cell");
             gtk_grid_attach(GTK_GRID(w->grid_need), w->label_need[i][j], j + 1, i + 1, 1, 1);
         }
     }
 
     w->updating_ui = false;
+    update_need_display(w);
     update_validation_display(w);
 }
 
@@ -696,20 +701,17 @@ static void on_load_preset(GtkWidget *btn, gpointer user_data) {
         w->updating_ui = false;
         rebuild_matrix_grids(w);
     } else {
-        /* If relative path lookup failed from current directory, try demo baseline */
-        gui_model_init_demo(w->model);
-        w->updating_ui = true;
-        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
-        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
-        w->updating_ui = false;
-        rebuild_matrix_grids(w);
+        /* Preserve current committed state, display error without silent fallback */
+        gtk_label_set_text(GTK_LABEL(w->banner_label), err);
+        gtk_widget_remove_css_class(w->banner_box, "valid-banner");
+        gtk_widget_add_css_class(w->banner_box, "error-banner");
     }
 }
 
 static void on_resources_map(GtkWidget *widget, gpointer user_data) {
     (void)widget;
     ResourcesWidgets *w = (ResourcesWidgets *)user_data;
-    gui_model_init_draft_from_current(w->model);
+    /* Preserve uncommitted draft across page navigation; do not reset from current */
     w->updating_ui = true;
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
@@ -741,8 +743,8 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     g_signal_connect(btn_p1, "clicked", G_CALLBACK(on_load_preset), w);
     gtk_box_append(GTK_BOX(hdr_btn_box), btn_p1);
 
-    GtkWidget *btn_p2 = gtk_button_new_with_label("Preset: unsafe.txt");
-    g_object_set_data(G_OBJECT(btn_p2), "path", (gpointer)"tests/scenarios/unsafe.txt");
+    GtkWidget *btn_p2 = gtk_button_new_with_label("Preset: unsafe_initial.txt (Unsafe)");
+    g_object_set_data(G_OBJECT(btn_p2), "path", (gpointer)"tests/scenarios/unsafe_initial.txt");
     g_signal_connect(btn_p2, "clicked", G_CALLBACK(on_load_preset), w);
     gtk_box_append(GTK_BOX(hdr_btn_box), btn_p2);
 
