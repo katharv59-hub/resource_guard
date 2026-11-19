@@ -639,7 +639,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
 
     /* Auto-calculate Available and commit draft */
-    gui_model_auto_calculate_available(model);
+    gui_model_auto_calculate_draft_available(model);
     g_signal_emit_by_name(res_w->btn_commit, "clicked");
     process_pending_events();
 
