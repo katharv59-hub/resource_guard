@@ -60,6 +60,7 @@ struct GuiModel {
 
 /* Lifecycle */
 void gui_model_init(GuiModel *m);
+void gui_model_load_demo(GuiModel *m);
 void gui_model_init_demo(GuiModel *m);
 void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data);
 

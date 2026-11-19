@@ -16,7 +16,7 @@ static void test_listener(GuiModel *m, void *user_data) {
 }
 
 static void test_initialization(void) {
-    printf("[TEST 1/11] Initial empty model state...\n");
+    printf("[TEST 1/12] Initial empty model state...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -36,7 +36,7 @@ static void test_initialization(void) {
 }
 
 static void test_demo_initialization(void) {
-    printf("[TEST 2/11] Demo baseline initialization...\n");
+    printf("[TEST 2/12] Demo baseline initialization...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -69,7 +69,7 @@ static void test_demo_initialization(void) {
 }
 
 static void test_listener_preservation_and_monotonic_version(void) {
-    printf("[TEST 3/11] Listener preservation & monotonic state version advancement...\n");
+    printf("[TEST 3/12] Listener preservation & monotonic state version advancement...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -79,17 +79,17 @@ static void test_listener_preservation_and_monotonic_version(void) {
     assert(m.listener == test_listener);
     assert(m.listener_user_data == (void*)0x1234);
 
-    /* Reinitialize demo state */
-    gui_model_init_demo(&m);
+    /* Load demo state */
+    gui_model_load_demo(&m);
     assert(m.listener == test_listener);
     assert(m.listener_user_data == (void*)0x1234);
     assert(g_listener_called > 0);
     uint64_t v1 = m.state_version;
     assert(v1 > 0);
 
-    /* Reinitialize demo state again: must advance version and keep listener */
+    /* Load demo state again: must advance version and preserve listener */
     int prev_calls = g_listener_called;
-    gui_model_init_demo(&m);
+    gui_model_load_demo(&m);
     assert(m.listener == test_listener);
     assert(m.listener_user_data == (void*)0x1234);
     assert(g_listener_called > prev_calls);
@@ -101,7 +101,7 @@ static void test_listener_preservation_and_monotonic_version(void) {
 }
 
 static void test_dimension_changes(void) {
-    printf("[TEST 4/11] Dimensional resizing and bounds clamping...\n");
+    printf("[TEST 4/12] Dimensional resizing and bounds clamping...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -130,7 +130,7 @@ static void test_dimension_changes(void) {
 }
 
 static void test_need_matches_banker_need(void) {
-    printf("[TEST 5/11] Authoritative Need derivation (gui_model_get_draft_need == banker_need)...\n");
+    printf("[TEST 5/12] Authoritative Need derivation (gui_model_get_draft_need == banker_need)...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -167,7 +167,7 @@ static void test_need_matches_banker_need(void) {
 }
 
 static void test_draft_validation_rejections(void) {
-    printf("[TEST 6/11] Validation errors and draft rejection...\n");
+    printf("[TEST 6/12] Validation errors and draft rejection...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -209,7 +209,7 @@ static void test_draft_validation_rejections(void) {
 }
 
 static void test_draft_persistence_and_discard(void) {
-    printf("[TEST 7/11] Draft persistence across page navigation and explicit discard...\n");
+    printf("[TEST 7/12] Draft persistence across page navigation and explicit discard...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -233,7 +233,7 @@ static void test_draft_persistence_and_discard(void) {
 }
 
 static void test_auto_calculate_available_and_commit(void) {
-    printf("[TEST 8/11] Auto-calculate Available and commit draft...\n");
+    printf("[TEST 8/12] Auto-calculate Available and commit draft...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -259,7 +259,7 @@ static void test_auto_calculate_available_and_commit(void) {
 }
 
 static void test_unsafe_scenario_preset_and_safety_state(void) {
-    printf("[TEST 9/11] Loading unsafe_initial.txt and verifying UNSAFE evaluation...\n");
+    printf("[TEST 9/12] Loading unsafe_initial.txt and verifying UNSAFE evaluation...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -288,7 +288,7 @@ static void test_unsafe_scenario_preset_and_safety_state(void) {
 }
 
 static void test_failed_preset_preserves_state(void) {
-    printf("[TEST 10/11] Failed preset loading preserves current state without silent fallback...\n");
+    printf("[TEST 10/12] Failed preset loading preserves current state without silent fallback...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -320,7 +320,7 @@ static void test_failed_preset_preserves_state(void) {
 }
 
 static void test_demo_parity_with_file(void) {
-    printf("[TEST 11/11] Parity check between built-in demo baseline and tests/scenarios/demo.txt...\n");
+    printf("[TEST 11/12] Parity check between built-in demo baseline and tests/scenarios/demo.txt...\n");
     fflush(stdout);
     BankerState file_state;
     char err_buf[256] = {0};
@@ -350,6 +350,39 @@ static void test_demo_parity_with_file(void) {
     fflush(stdout);
 }
 
+static void test_reset_to_original_baseline(void) {
+    printf("[TEST 12/12] Reset to baseline restores original scenario after draft edits & commit...\n");
+    fflush(stdout);
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_load_demo(&m);
+
+    /* Verify original baseline values */
+    int orig_p0_alloc = m.original_state.alloc[0][1];
+    assert(orig_p0_alloc == 1);
+
+    /* Modify draft, auto-calculate available, and commit */
+    gui_model_set_draft_alloc(&m, 0, 1, 3);
+    gui_model_auto_calculate_draft_available(&m);
+    assert(gui_model_commit_draft(&m));
+    assert(m.current_state.alloc[0][1] == 3);
+    uint64_t ver_after_commit = m.state_version;
+
+    /* Register listener to verify notification on reset */
+    g_listener_called = 0;
+    gui_model_set_listener(&m, test_listener, NULL);
+
+    /* Reset to original baseline */
+    assert(gui_model_reset_to_original(&m));
+    assert(m.current_state.alloc[0][1] == orig_p0_alloc);
+    assert(m.draft_state.alloc[0][1] == orig_p0_alloc);
+    assert(m.state_version > ver_after_commit);
+    assert(g_listener_called == 1);
+
+    printf("  -> Passed (baseline restored, version advanced, listener notified).\n");
+    fflush(stdout);
+}
+
 int main(void) {
     printf("\n============================================================\n");
     printf(" RESOURCEGUARD GUI MODEL & APPLICATION CONTROLLER TESTS\n");
@@ -367,9 +400,10 @@ int main(void) {
     test_unsafe_scenario_preset_and_safety_state();
     test_failed_preset_preserves_state();
     test_demo_parity_with_file();
+    test_reset_to_original_baseline();
 
     printf("\n============================================================\n");
-    printf(" ALL 11 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
+    printf(" ALL 12 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
     printf("============================================================\n\n");
     fflush(stdout);
     return 0;

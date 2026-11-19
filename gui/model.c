@@ -18,6 +18,36 @@ static void extract_basename(const char *path, char *out, size_t out_len) {
     snprintf(out, out_len, "%s", start);
 }
 
+static bool resolve_scenario_file(const char *rel_path, char *out, size_t out_len) {
+    if (!rel_path || !out || out_len == 0) return false;
+
+    FILE *f = fopen(rel_path, "r");
+    if (f) {
+        fclose(f);
+        snprintf(out, out_len, "%s", rel_path);
+        return true;
+    }
+
+    char candidate[512];
+    snprintf(candidate, sizeof(candidate), "../%s", rel_path);
+    f = fopen(candidate, "r");
+    if (f) {
+        fclose(f);
+        snprintf(out, out_len, "%s", candidate);
+        return true;
+    }
+
+    snprintf(candidate, sizeof(candidate), "../../%s", rel_path);
+    f = fopen(candidate, "r");
+    if (f) {
+        fclose(f);
+        snprintf(out, out_len, "%s", candidate);
+        return true;
+    }
+
+    return false;
+}
+
 static void notify_change(GuiModel *m) {
     if (m && m->listener) {
         m->listener(m, m->listener_user_data);
@@ -33,25 +63,26 @@ void gui_model_init(GuiModel *m) {
     snprintf(m->scenario_name, sizeof(m->scenario_name), "None (Empty State)");
     m->draft_status = BANKER_OK;
     m->draft_validation_msg[0] = '\0';
+    m->listener = NULL;
+    m->listener_user_data = NULL;
 }
 
-void gui_model_init_demo(GuiModel *m) {
+void gui_model_load_demo(GuiModel *m) {
     if (!m) return;
 
-    /* Preserve existing listener and advance state version monotonically */
-    GuiModelChangeListener saved_listener = m->listener;
-    void *saved_user_data = m->listener_user_data;
-    uint64_t next_version = m->state_version + 1;
+    /* Advance version monotonically */
+    m->state_version++;
 
-    memset(m, 0, sizeof(*m));
-    m->listener = saved_listener;
-    m->listener_user_data = saved_user_data;
-    m->state_version = next_version;
+    char resolved[512] = {0};
+    bool has_file = resolve_scenario_file("tests/scenarios/demo.txt", resolved, sizeof(resolved));
 
-    /* Try to load authoritative scenario file if present on disk */
-    char parse_err[256] = {0};
     BankerState s;
-    bool loaded_from_file = banker_load_scenario("tests/scenarios/demo.txt", &s, parse_err, sizeof(parse_err));
+    char parse_err[256] = {0};
+    bool loaded_from_file = false;
+
+    if (has_file) {
+        loaded_from_file = banker_load_scenario(resolved, &s, parse_err, sizeof(parse_err));
+    }
 
     if (!loaded_from_file) {
         /* Fall back to built-in demonstration configuration */
@@ -83,7 +114,7 @@ void gui_model_init_demo(GuiModel *m) {
         m->scenario_path[0] = '\0';
         snprintf(m->scenario_name, sizeof(m->scenario_name), "Built-in Demo Baseline (5 procs, 3 res)");
     } else {
-        snprintf(m->scenario_path, sizeof(m->scenario_path), "tests/scenarios/demo.txt");
+        snprintf(m->scenario_path, sizeof(m->scenario_path), "%s", resolved);
         snprintf(m->scenario_name, sizeof(m->scenario_name), "demo.txt (5 procs, 3 res)");
     }
 
@@ -94,6 +125,12 @@ void gui_model_init_demo(GuiModel *m) {
 
     gui_model_validate_draft(m);
     notify_change(m);
+}
+
+void gui_model_init_demo(GuiModel *m) {
+    if (!m) return;
+    gui_model_init(m);
+    gui_model_load_demo(m);
 }
 
 void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
@@ -108,9 +145,14 @@ bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_
         return false;
     }
 
+    char actual_path[512];
+    if (!resolve_scenario_file(path, actual_path, sizeof(actual_path))) {
+        snprintf(actual_path, sizeof(actual_path), "%s", path);
+    }
+
     BankerState loaded;
     char parse_err[256] = {0};
-    if (!banker_load_scenario(path, &loaded, parse_err, sizeof(parse_err))) {
+    if (!banker_load_scenario(actual_path, &loaded, parse_err, sizeof(parse_err))) {
         if (err_buf && err_len > 0) {
             snprintf(err_buf, err_len, "Scenario parsing failed: %s", parse_err);
         }

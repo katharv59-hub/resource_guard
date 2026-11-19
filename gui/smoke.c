@@ -26,7 +26,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf("============================================================\n");
 
     /* CHECK 1: GTK Subsystem & CSS Provider Initialization */
-    printf("[CHECK 1/8] GTK Subsystem & CSS Provider Initialization (Zero Parse Errors)...\n");
+    printf("[CHECK 1/9] GTK Subsystem & CSS Provider Initialization (Zero Parse Errors)...\n");
     if (!gtk_init_check()) {
         fprintf(stderr, "FAIL: gtk_init_check() failed. Cannot connect to display.\n");
         return 1;
@@ -39,7 +39,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf("  -> OK: GTK initialized and CSS provider loaded with 0 parsing errors.\n");
 
     /* CHECK 2: GtkApplication Creation and Activation */
-    printf("[CHECK 2/8] Creating and registering GtkApplication...\n");
+    printf("[CHECK 2/9] Creating and registering GtkApplication...\n");
     GtkApplication *app = gtk_application_new(
         "io.github.katharv59.resourceguard.smoke",
         G_APPLICATION_DEFAULT_FLAGS
@@ -60,7 +60,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf("  -> OK: GtkApplication created and registered successfully.\n");
 
     /* CHECK 3: Main Application Window Creation & Model Binding */
-    printf("[CHECK 3/8] Building main GtkApplicationWindow and verifying model binding...\n");
+    printf("[CHECK 3/9] Building main GtkApplicationWindow and verifying model binding...\n");
     GtkWidget *win = gui_window_new(app);
     if (!win || !GTK_IS_APPLICATION_WINDOW(win)) {
         fprintf(stderr, "FAIL: gui_window_new() did not produce a valid GtkApplicationWindow.\n");
@@ -79,7 +79,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
            model->current_state.n, model->current_state.m);
 
     /* CHECK 4: Window Presentation, Visibility & Mapping (gtk_widget_get_mapped) */
-    printf("[CHECK 4/8] Presenting window and asserting visibility & mapped state (gtk_widget_get_mapped)...\n");
+    printf("[CHECK 4/9] Presenting window and asserting visibility & mapped state (gtk_widget_get_mapped)...\n");
     gtk_window_present(GTK_WINDOW(win));
     gtk_widget_set_visible(win, TRUE);
 
@@ -103,7 +103,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf("  -> OK: Window is confirmed visible and mapped to display.\n");
 
     /* CHECK 5: GtkStack Verification (Exactly 7 Pages) */
-    printf("[CHECK 5/8] Inspecting GtkStack page count...\n");
+    printf("[CHECK 5/9] Inspecting GtkStack page count...\n");
     GtkWidget *stack = gui_window_get_stack(win);
     if (!stack || !GTK_IS_STACK(stack)) {
         fprintf(stderr, "FAIL: gui_window_get_stack() returned NULL or non-GtkStack widget.\n");
@@ -130,7 +130,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf("  -> OK: GtkStack contains exactly %u pages.\n", n_pages);
 
     /* CHECK 6: All 7 Page Names Registered */
-    printf("[CHECK 6/8] Verifying registration of all 7 page containers...\n");
+    printf("[CHECK 6/9] Verifying registration of all 7 page containers...\n");
     const char *expected_pages[7] = {
         "dashboard",
         "resources",
@@ -156,7 +156,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf("  -> OK: All 7 page containers are registered.\n");
 
     /* CHECK 7: Programmatic Page Switching Across All Views */
-    printf("[CHECK 7/8] Testing programmatic navigation across all 7 pages...\n");
+    printf("[CHECK 7/9] Testing programmatic navigation across all 7 pages...\n");
     for (int i = 0; i < 7; i++) {
         gtk_stack_set_visible_child_name(GTK_STACK(stack), expected_pages[i]);
         process_pending_events();
@@ -176,15 +176,59 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     process_pending_events();
     printf("  -> OK: Programmatic page switching verified for all 7 views.\n");
 
-    /* CHECK 8: Clean Teardown and Exit */
-    printf("[CHECK 8/8] Tearing down window and releasing resources...\n");
+    /* CHECK 8: GUI Integration — Draft Persistence Across Page Navigation */
+    printf("[CHECK 8/9] Verifying uncommitted draft persistence across page navigation...\n");
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "resources");
+    process_pending_events();
+
+    int orig_val = model->current_state.alloc[0][0];
+    gui_model_set_draft_alloc(model, 0, 0, orig_val + 2);
+    if (model->draft_state.alloc[0][0] != orig_val + 2) {
+        fprintf(stderr, "FAIL: Draft allocation was not updated.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Navigate to dashboard */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "dashboard");
+    process_pending_events();
+
+    /* Navigate back to resources (triggers map signal) */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "resources");
+    process_pending_events();
+
+    /* Verify draft is retained (map signal did NOT overwrite draft) */
+    if (model->draft_state.alloc[0][0] != orig_val + 2) {
+        fprintf(stderr, "FAIL: Draft was discarded upon page navigation back to resources!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Discard draft */
+    gui_model_init_draft_from_current(model);
+    if (model->draft_state.alloc[0][0] != orig_val) {
+        fprintf(stderr, "FAIL: Discard did not restore committed state.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    printf("  -> OK: Draft persistence across navigation and explicit discard verified.\n");
+
+    /* Switch back to Dashboard before exit */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "dashboard");
+    process_pending_events();
+
+    /* CHECK 9: Clean Teardown and Exit */
+    printf("[CHECK 9/9] Tearing down window and releasing resources...\n");
     gtk_window_destroy(GTK_WINDOW(win));
     process_pending_events();
     g_object_unref(app);
     printf("  -> OK: Teardown complete.\n");
 
     printf("\n============================================================\n");
-    printf(" ALL 8 GTK4 SMOKE TEST ASSERTIONS PASSED SUCCESSFULLY!\n");
+    printf(" ALL 9 GTK4 SMOKE TEST ASSERTIONS PASSED SUCCESSFULLY!\n");
     printf("============================================================\n\n");
     return 0;
 }

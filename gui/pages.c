@@ -154,10 +154,10 @@ static void dashboard_refresh(DashboardWidgets *w) {
         gtk_label_set_text(GTK_LABEL(w->label_safety_desc),
                            "All processes can acquire their maximum declared demand and terminate safely without deadlock.");
     } else {
-        gtk_label_set_text(GTK_LABEL(w->label_safety_title), "Deadlock Inevitable / Unsafe Allocation:");
+        gtk_label_set_text(GTK_LABEL(w->label_safety_title), "Unsafe Allocation State Detected:");
         gtk_label_set_text(GTK_LABEL(w->label_safety_seq), "< No Safe Execution Sequence Exists >");
         gtk_label_set_text(GTK_LABEL(w->label_safety_desc),
-                           "Current resource allocations cannot guarantee process completion without potential deadlock.");
+                           "No safe execution sequence exists for current state. Potential deadlock risk under maximum demand; safe process completion cannot be guaranteed.");
     }
 
     /* Update Total Vector */
@@ -198,7 +198,7 @@ static void on_dash_goto_resources(GtkWidget *btn, gpointer user_data) {
 static void on_dash_load_demo(GtkWidget *btn, gpointer user_data) {
     (void)btn;
     DashboardWidgets *w = (DashboardWidgets *)user_data;
-    gui_model_init_demo(w->model);
+    gui_model_load_demo(w->model);
 }
 
 static void on_dash_reset_baseline(GtkWidget *btn, gpointer user_data) {
@@ -639,6 +639,18 @@ static void on_discard_clicked(GtkWidget *btn, gpointer user_data) {
     rebuild_matrix_grids(w);
 }
 
+static void on_reset_baseline_clicked(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (gui_model_reset_to_original(w->model)) {
+        w->updating_ui = true;
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+        w->updating_ui = false;
+        rebuild_matrix_grids(w);
+    }
+}
+
 static void on_scenario_file_response(GtkNativeDialog *dialog, int response, gpointer user_data) {
     ResourcesWidgets *w = (ResourcesWidgets *)user_data;
     if (response == GTK_RESPONSE_ACCEPT) {
@@ -749,8 +761,12 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     gtk_box_append(GTK_BOX(hdr_btn_box), btn_p2);
 
     GtkWidget *btn_rst = gtk_button_new_with_label("Reset to Baseline");
-    g_signal_connect(btn_rst, "clicked", G_CALLBACK(on_discard_clicked), w);
+    g_signal_connect(btn_rst, "clicked", G_CALLBACK(on_reset_baseline_clicked), w);
     gtk_box_append(GTK_BOX(hdr_btn_box), btn_rst);
+
+    GtkWidget *btn_disc = gtk_button_new_with_label("Discard Draft");
+    g_signal_connect(btn_disc, "clicked", G_CALLBACK(on_discard_clicked), w);
+    gtk_box_append(GTK_BOX(hdr_btn_box), btn_disc);
 
     w->badge_status = create_badge("COMMITTED (v1)", "badge-emerald");
     gtk_box_append(GTK_BOX(hdr_btn_box), w->badge_status);
