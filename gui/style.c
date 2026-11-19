@@ -154,13 +154,26 @@ static const char *GUI_STYLE_CSS =
 "    font-style: italic;\n"
 "}\n";
 
-void gui_style_init(void) {
+static bool s_style_initialized = false;
+
+bool gui_style_init(void) {
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return false;
+
     GtkCssProvider *provider = gtk_css_provider_new();
+    if (!provider) return false;
+
     gtk_css_provider_load_from_data(provider, GUI_STYLE_CSS, -1);
     gtk_style_context_add_provider_for_display(
-        gdk_display_get_default(),
+        display,
         GTK_STYLE_PROVIDER(provider),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
     );
     g_object_unref(provider);
+    s_style_initialized = true;
+    return true;
+}
+
+bool gui_style_is_initialized(void) {
+    return s_style_initialized;
 }

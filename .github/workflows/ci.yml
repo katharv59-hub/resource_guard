@@ -10,7 +10,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libgtk-4-dev xvfb imagemagick
+          sudo apt-get install -y build-essential libgtk-4-dev xvfb openbox scrot python3-pil python3
 
       - name: Show compiler and GTK version
         run: |
@@ -77,20 +77,78 @@ jobs:
       - name: Build GTK4 Desktop Application
         run: make gui
 
-      - name: Verify GTK4 Application Execution (Headless)
+      - name: Run GTK4 Application Smoke Test
+        run: |
+          GDK_BACKEND=x11 GSK_RENDERER=cairo xvfb-run -s "-screen 0 1280x800x24" \
+            ./resourceguard_gui --smoke-test --screenshot smoke_snapshot.png
+
+      - name: Capture Live X11 Window Screenshot
         run: |
           xvfb-run -s "-screen 0 1280x800x24" bash -c '
-            ./resourceguard_gui &
+            set -e
+            openbox &
+            OB_PID=$!
+            sleep 1
+
+            GDK_BACKEND=x11 GSK_RENDERER=cairo ./resourceguard_gui &
             GUI_PID=$!
             sleep 3
-            import -window root screenshot.png || true
-            kill $GUI_PID 2>/dev/null || true
+
+            scrot -z screenshot.png
+
+            kill -TERM $GUI_PID 2>/dev/null || true
+            wait $GUI_PID 2>/dev/null || true
+            kill -TERM $OB_PID 2>/dev/null || true
           '
+
+      - name: Validate Screenshot Content (Non-Blank / Non-Black)
+        run: |
+          python3 -c "
+          import sys, os
+          from PIL import Image
+
+          found = False
+          for target in ['screenshot.png', 'smoke_snapshot.png']:
+              if os.path.exists(target):
+                  size = os.path.getsize(target)
+                  print(f'Inspecting {target}: file size = {size} bytes')
+                  if size < 1000:
+                      print(f'FAILURE: {target} is suspiciously small ({size} bytes).')
+                      sys.exit(1)
+
+                  img = Image.open(target)
+                  print(f'Dimensions: {img.size}')
+                  extrema = img.getextrema()
+                  print(f'Pixel extrema: {extrema}')
+
+                  colors = img.getcolors(maxcolors=200000)
+                  n_colors = len(colors) if colors else 200000
+                  print(f'Unique colors: {n_colors}')
+
+                  max_val = max(e[1] if isinstance(e, tuple) else e for e in extrema)
+                  if max_val < 30:
+                      print(f'FAILURE: {target} is completely black (max pixel value: {max_val}).')
+                      sys.exit(1)
+
+                  if n_colors < 10:
+                      print(f'FAILURE: {target} lacks visual structure ({n_colors} unique colors).')
+                      sys.exit(1)
+
+                  print(f'VALIDATION SUCCESS: {target} contains authentic rendered GUI content ({n_colors} colors, {size} bytes).')
+                  found = True
+                  break
+
+          if not found:
+              print('FAILURE: No valid screenshot file was generated.')
+              sys.exit(1)
+          "
 
       - name: Upload GTK4 Application Screenshot
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gtk4-app-screenshot
-          path: screenshot.png
-          if-no-files-found: ignore
+          path: |
+            screenshot.png
+            smoke_snapshot.png
+          if-no-files-found: error

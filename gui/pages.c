@@ -91,12 +91,18 @@ GtkWidget *gui_page_dashboard_create(void) {
     gtk_box_append(GTK_BOX(box), header_card);
 
     /* Overview Status Card */
-    GtkWidget *status_card = create_card("System Safety & Allocation Overview",
-                                         "Real-time state summary according to the Banker's safety criteria.");
+    GtkWidget *status_card = create_card("System Architecture & Reference Overview",
+                                         "Structural overview of the planned simulator integration.");
+    GtkWidget *badge_ref = create_badge("Reference Model — Live Binding Pending (M4)", "badge-amber");
+    gtk_box_append(GTK_BOX(status_card), badge_ref);
+
     GtkWidget *body_label = gtk_label_new(
-        "Active Configuration: Initialized demo baseline (5 processes, 3 resource types).\n"
-        "Engine Status: Verified against 24,092 test checks (0 invariant violations).\n"
-        "Safety Algorithm: Ready for live state binding and execution tracking.");
+        "Demonstration Baseline Specification:\n"
+        "  * Target Model: 5 processes, 3 resource types (Standard Banker Demonstration)\n"
+        "  * Engine Core: Verified independent C11 engine (24,092 tests passed, 0 failures)\n"
+        "  * Concurrency: POSIX threads simulation engine verified (TSan clean)\n\n"
+        "[Notice] Live BankerState data binding is scheduled for Milestone 4 integration.\n"
+        "No live process or resource metrics are currently active.");
     gtk_label_set_xalign(GTK_LABEL(body_label), 0.0f);
     gtk_label_set_wrap(GTK_LABEL(body_label), TRUE);
     gtk_widget_add_css_class(body_label, "card-body");

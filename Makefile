@@ -11,8 +11,8 @@ THDR   = engine/threading.h
 # GUI module (GTK4 — Linux only)
 GTK_CFLAGS ?= $(shell pkg-config --cflags gtk4 2>/dev/null)
 GTK_LIBS   ?= $(shell pkg-config --libs gtk4 2>/dev/null)
-GUI_SRCS    = gui/main.c gui/app.c gui/window.c gui/pages.c gui/style.c
-GUI_HDRS    = gui/app.h gui/window.h gui/pages.h gui/style.h
+GUI_SRCS    = gui/main.c gui/app.c gui/window.c gui/pages.c gui/style.c gui/smoke.c
+GUI_HDRS    = gui/app.h gui/window.h gui/pages.h gui/style.h gui/smoke.h
 GUI_BIN     = resourceguard_gui
 
 all: banker_cli test_banker
@@ -70,10 +70,13 @@ gui: $(GUI_BIN)
 $(GUI_BIN): $(GUI_SRCS) $(GUI_HDRS) $(ENGINE) $(THREAD) $(HDRS) $(THDR)
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) -pthread $(GUI_SRCS) $(ENGINE) $(THREAD) $(GTK_LIBS) -o $@
 
+test_gui: $(GUI_BIN)
+	xvfb-run -s "-screen 0 1280x800x24" ./$(GUI_BIN) --smoke-test
+
 clean:
 	rm -f banker_cli test_banker test_banker_asan test_banker_ubsan \
 	      test_threading test_threading_asan test_threading_ubsan test_threading_tsan \
 	      $(GUI_BIN)
 
-.PHONY: all test ubsan sanitize demo clean gui \
+.PHONY: all test ubsan sanitize demo clean gui test_gui \
         test_threads test_threads_ubsan tsan test_threads_sanitize

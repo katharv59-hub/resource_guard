@@ -2,6 +2,9 @@
 #ifndef GUI_STYLE_H
 #define GUI_STYLE_H
 
-void gui_style_init(void);
+#include <stdbool.h>
+
+bool gui_style_init(void);
+bool gui_style_is_initialized(void);
 
 #endif /* GUI_STYLE_H */

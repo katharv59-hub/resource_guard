@@ -59,7 +59,15 @@ GtkWidget *gui_window_new(GtkApplication *app) {
 
     gtk_box_append(GTK_BOX(main_box), stack);
 
+    /* Store reference to stack for navigation access and smoke tests */
+    g_object_set_data(G_OBJECT(win), "gui-stack", stack);
+
     gtk_window_set_child(GTK_WINDOW(win), main_box);
 
     return win;
+}
+
+GtkWidget *gui_window_get_stack(GtkWidget *win) {
+    if (!win) return NULL;
+    return GTK_WIDGET(g_object_get_data(G_OBJECT(win), "gui-stack"));
 }

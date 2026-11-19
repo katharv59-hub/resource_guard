@@ -5,5 +5,6 @@
 #include <gtk/gtk.h>
 
 GtkWidget *gui_window_new(GtkApplication *app);
+GtkWidget *gui_window_get_stack(GtkWidget *win);
 
 #endif /* GUI_WINDOW_H */
