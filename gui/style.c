@@ -6,7 +6,7 @@
 #include <gtk/gtk.h>
 #include <stdio.h>
 
-static const char *GUI_STYLE_CSS =
+static const char *GUI_STYLE_CSS_PART1 =
 "/* ResourceGuard GTK4 Professional Dark Theme */\n"
 "\n"
 "/* Base Window and Surface */\n"
@@ -142,8 +142,9 @@ static const char *GUI_STYLE_CSS =
 "    background-color: rgba(148, 163, 184, 0.1);\n"
 "    color: #94a3b8;\n"
 "    border: 1px solid rgba(148, 163, 184, 0.2);\n"
-"}\n"
-"\n"
+"}\n";
+
+static const char *GUI_STYLE_CSS_PART2 =
 "/* Buttons */\n"
 "button {\n"
 "    background-color: #1e293b;\n"
@@ -332,7 +333,10 @@ bool gui_style_init(void) {
     s_has_css_error = false;
     g_signal_connect(provider, "parsing-error", G_CALLBACK(on_parsing_error), NULL);
 
-    gtk_css_provider_load_from_data(provider, GUI_STYLE_CSS, -1);
+    char *combined = g_strconcat(GUI_STYLE_CSS_PART1, GUI_STYLE_CSS_PART2, NULL);
+    gtk_css_provider_load_from_data(provider, combined, -1);
+    g_free(combined);
+
     gtk_style_context_add_provider_for_display(
         display,
         GTK_STYLE_PROVIDER(provider),

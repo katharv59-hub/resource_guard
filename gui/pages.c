@@ -126,7 +126,7 @@ static void dashboard_refresh(DashboardWidgets *w) {
     }
 
     char ver_buf[64];
-    snprintf(ver_buf, sizeof(ver_buf), "State: v%llu", (unsigned long long)snap.state_version);
+    snprintf(ver_buf, sizeof(ver_buf), "State: v%lu", (unsigned long)snap.state_version);
     gtk_label_set_text(GTK_LABEL(w->badge_version), ver_buf);
 
     char dim_buf[64];
@@ -492,7 +492,7 @@ static void rebuild_matrix_grids(ResourcesWidgets *w) {
         gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_available[j]), w->model->draft_state.available[j]);
         g_object_set_data(G_OBJECT(w->spin_available[j]), "res", GINT_TO_POINTER(j));
         g_signal_connect(w->spin_available[j], "value-changed", G_CALLBACK(on_available_cell_changed), w);
-        gtk_grid_attach(GTK_GRID(w->grid_vectors), w->spin_available[j], j + 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(w->grid_vectors), w->spin_available[j], j + 1, 1, 1, 1);
     }
 
     /* ---- 2. Helper Lambda / Rebuilder for Allocation Grid ---- */
@@ -616,7 +616,7 @@ static void on_commit_clicked(GtkWidget *btn, gpointer user_data) {
     ResourcesWidgets *w = (ResourcesWidgets *)user_data;
     if (gui_model_commit_draft(w->model)) {
         char buf[64];
-        snprintf(buf, sizeof(buf), "COMMITTED (v%llu)", (unsigned long long)w->model->state_version);
+        snprintf(buf, sizeof(buf), "COMMITTED (v%lu)", (unsigned long)w->model->state_version);
         gtk_label_set_text(GTK_LABEL(w->badge_status), buf);
         gtk_widget_remove_css_class(w->badge_status, "badge-rose");
         gtk_widget_add_css_class(w->badge_status, "badge-emerald");
