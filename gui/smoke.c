@@ -757,8 +757,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
 
     const char *desc_zero_unsafe = gtk_label_get_text(GTK_LABEL(rw->label_result_desc));
     if (!strstr(desc_zero_unsafe, "accepted as a no-op") ||
-        (!strstr(desc_zero_unsafe, "Banker's safety evaluation was not required") &&
-         !strstr(desc_zero_unsafe, "no safety evaluation"))) {
+        !strstr(desc_zero_unsafe, "no new safety evaluation was performed")) {
         fprintf(stderr, "FAIL: Description did not state no safety evaluation was performed (got '%s').\n", desc_zero_unsafe);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
