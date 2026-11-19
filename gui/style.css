@@ -1,0 +1,184 @@
+/* ResourceGuard GTK4 Professional Dark Theme */
+
+/* Base Window and Surface */
+window.background {
+    background-color: #0f141c;
+    color: #e2e8f0;
+}
+
+headerbar {
+    background-color: #161e2a;
+    border-bottom: 1px solid #263347;
+    color: #e2e8f0;
+    min-height: 48px;
+    padding: 0 12px;
+}
+
+headerbar .title {
+    font-weight: 700;
+    font-size: 15px;
+    color: #f8fafc;
+}
+
+headerbar .subtitle {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+/* Sidebar navigation */
+stacksidebar {
+    background-color: #131922;
+    border-right: 1px solid #263347;
+}
+
+stacksidebar list {
+    background-color: transparent;
+    padding: 8px;
+}
+
+stacksidebar row {
+    padding: 10px 14px;
+    margin-bottom: 4px;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-weight: 500;
+    transition: all 150ms ease-in-out;
+}
+
+stacksidebar row:hover {
+    background-color: #1a2332;
+    color: #f1f5f9;
+}
+
+stacksidebar row:selected {
+    background-color: #1e293b;
+    color: #00b4d8;
+    font-weight: 600;
+    border-left: 3px solid #00b4d8;
+}
+
+/* Page containers & ScrolledWindow */
+scrolledwindow {
+    background-color: #0f141c;
+}
+
+.page-container {
+    padding: 24px;
+}
+
+/* Reusable Cards */
+.card {
+    background-color: #1a2332;
+    border: 1px solid #263347;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 4px;
+}
+
+.card-subtitle {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-bottom: 12px;
+}
+
+.card-body {
+    font-size: 13px;
+    color: #cbd5e1;
+    line-height: 1.5;
+}
+
+/* Badges */
+.badge {
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.badge-teal {
+    background-color: rgba(0, 180, 216, 0.15);
+    color: #00b4d8;
+    border: 1px solid rgba(0, 180, 216, 0.3);
+}
+
+.badge-emerald {
+    background-color: rgba(6, 214, 160, 0.15);
+    color: #06d6a0;
+    border: 1px solid rgba(6, 214, 160, 0.3);
+}
+
+.badge-amber {
+    background-color: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-muted {
+    background-color: rgba(148, 163, 184, 0.1);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+/* Buttons */
+button {
+    background-color: #1e293b;
+    color: #f1f5f9;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 500;
+    font-size: 13px;
+    transition: all 120ms ease-in-out;
+}
+
+button:hover {
+    background-color: #273549;
+    border-color: #475569;
+    color: #ffffff;
+}
+
+button.primary {
+    background-color: #00b4d8;
+    color: #0f172a;
+    border-color: #00b4d8;
+    font-weight: 600;
+}
+
+button.primary:hover {
+    background-color: #0096c7;
+    border-color: #0096c7;
+}
+
+/* Monospace text for matrices & vectors */
+.mono-text {
+    font-family: monospace;
+    font-size: 13px;
+    color: #38bdf8;
+    background-color: #111827;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #1f2937;
+}
+
+/* Placeholder notification banner */
+.placeholder-banner {
+    background-color: rgba(30, 41, 59, 0.6);
+    border: 1px dashed #334155;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 12px;
+}
+
+.placeholder-text {
+    font-size: 12px;
+    color: #94a3b8;
+    font-style: italic;
+}

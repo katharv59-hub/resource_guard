@@ -12,4 +12,5 @@ test_threading
 test_threading_asan
 test_threading_ubsan
 test_threading_tsan
+resourceguard_gui
 _stub/

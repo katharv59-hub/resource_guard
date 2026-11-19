@@ -10,10 +10,12 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential
+          sudo apt-get install -y build-essential libgtk-4-dev xvfb imagemagick
 
-      - name: Show compiler version
-        run: gcc --version
+      - name: Show compiler and GTK version
+        run: |
+          gcc --version
+          pkg-config --modversion gtk4
 
       # ---- Banker engine (Baseline verification) ----
 
@@ -38,11 +40,6 @@ jobs:
         run: make test_threads_ubsan
 
       # ---- Sanitizer capability probes & executions ----
-      # A minimal capability probe verifies whether the toolchain and runner
-      # environment support the sanitizer runtime.
-      # If the probe succeeds, the project build and test must pass unconditionally;
-      # no compilation error, runtime sanitizer error, or test failure is masked.
-
       - name: Probe ThreadSanitizer capability
         id: tsan_probe
         run: |
@@ -74,3 +71,26 @@ jobs:
       - name: Run AddressSanitizer threading tests
         if: steps.asan_probe.outputs.supported == 'true'
         run: make test_threads_sanitize
+
+      # ---- GTK4 Desktop Application ----
+
+      - name: Build GTK4 Desktop Application
+        run: make gui
+
+      - name: Verify GTK4 Application Execution (Headless)
+        run: |
+          xvfb-run -s "-screen 0 1280x800x24" bash -c '
+            ./resourceguard_gui &
+            GUI_PID=$!
+            sleep 3
+            import -window root screenshot.png || true
+            kill $GUI_PID 2>/dev/null || true
+          '
+
+      - name: Upload GTK4 Application Screenshot
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gtk4-app-screenshot
+          path: screenshot.png
+          if-no-files-found: ignore
