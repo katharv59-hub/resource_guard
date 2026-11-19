@@ -204,6 +204,7 @@ static void test_safe_mode_basic(void) {
 /* ================================================================== */
 
 typedef struct {
+    pthread_mutex_t mtx;
     int negative_available;   /* GRANTED events with negative Available   */
     int total_granted;        /* total GRANTED events seen by callback    */
 } InvariantCbCtx;
@@ -211,13 +212,16 @@ typedef struct {
 static void invariant_callback(const ThreadSimEvent *ev, void *data) {
     InvariantCbCtx *ctx = data;
     if (ev->type == TSIM_GRANTED) {
+        pthread_mutex_lock(&ctx->mtx);
         ctx->total_granted++;
         for (int j = 0; j < ev->m; j++) {
             if (ev->available[j] < 0) {
                 ctx->negative_available++;
+                pthread_mutex_unlock(&ctx->mtx);
                 return;
             }
         }
+        pthread_mutex_unlock(&ctx->mtx);
     }
 }
 
@@ -233,17 +237,22 @@ static void test_safe_mode_invariants(void) {
     ThreadSim *sim = tsim_create(&demo, &cfg, TSIM_MODE_SAFE);
     CHECK(sim != NULL);
 
-    InvariantCbCtx cb = {0};
+    InvariantCbCtx cb = { .negative_available = 0, .total_granted = 0 };
+    pthread_mutex_init(&cb.mtx, NULL);
     tsim_set_callback(sim, invariant_callback, &cb);
     CHECK(tsim_run(sim) == true);
 
     /* Callback: Available was never negative after any grant. */
+    pthread_mutex_lock(&cb.mtx);
     CHECK(cb.total_granted > 0);
     CHECK(cb.negative_available == 0);
+    int total_grants_seen = cb.total_granted;
+    pthread_mutex_unlock(&cb.mtx);
+    pthread_mutex_destroy(&cb.mtx);
 
     /* Results match callback count. */
     ThreadSimResults r = tsim_results(sim);
-    CHECK(r.granted == cb.total_granted);
+    CHECK(r.granted == total_grants_seen);
     CHECK(r.invariant_violations == 0);
     CHECK(r.unsafe_states_observed == 0);
 
@@ -769,6 +778,7 @@ static void test_completion_release(void) {
 
 typedef struct {
     const ThreadSim *sim;      /* sim handle for API calls from callback */
+    pthread_mutex_t  mtx;
     int              events_seen;
     bool             count_was_positive;
     bool             saw_event_zero;
@@ -776,16 +786,21 @@ typedef struct {
 
 static void reentrancy_callback(const ThreadSimEvent *ev, void *data) {
     ReentrancyCbCtx *ctx = data;
+    pthread_mutex_lock(&ctx->mtx);
     ctx->events_seen++;
     if (ev->event_id == 0)
         ctx->saw_event_zero = true;
+    pthread_mutex_unlock(&ctx->mtx);
 
     /* Call the public API from the callback — must NOT deadlock.
      * tsim_event_count() acquires log_mtx internally.  Since the
      * callback fires OUTSIDE all ThreadSim mutexes, this is safe. */
     int count = tsim_event_count(ctx->sim);
-    if (count > 0)
+    if (count > 0) {
+        pthread_mutex_lock(&ctx->mtx);
         ctx->count_was_positive = true;
+        pthread_mutex_unlock(&ctx->mtx);
+    }
 }
 
 static void test_callback_reentrancy(void) {
@@ -803,16 +818,21 @@ static void test_callback_reentrancy(void) {
     ReentrancyCbCtx ctx = { .sim = sim, .events_seen = 0,
                             .count_was_positive = false,
                             .saw_event_zero = false };
+    pthread_mutex_init(&ctx.mtx, NULL);
     tsim_set_callback(sim, reentrancy_callback, &ctx);
     CHECK(tsim_run(sim) == true);
 
     /* If we got here without deadlock, the callback is reentrant-safe. */
+    pthread_mutex_lock(&ctx.mtx);
     CHECK(ctx.events_seen > 0);
     CHECK(ctx.count_was_positive);
     CHECK(ctx.saw_event_zero);
+    int seen = ctx.events_seen;
+    pthread_mutex_unlock(&ctx.mtx);
+    pthread_mutex_destroy(&ctx.mtx);
 
     printf("  callback reentrancy: %d events, tsim_event_count() safe\n",
-           ctx.events_seen);
+           seen);
     tsim_destroy(sim);
 }
 
