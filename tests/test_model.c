@@ -14,8 +14,11 @@
 
 #if defined(_WIN32)
 #include <direct.h>
+#include <windows.h>
 #define MKDIR(d) _mkdir(d)
 #define RMDIR(d) _rmdir(d)
+#define CHDIR(d) _chdir(d)
+#define GETCWD(buf, sz) _getcwd(buf, (int)(sz))
 int _putenv(const char *string);
 char *_fullpath(char *absPath, const char *relPath, size_t maxLength);
 static void set_test_env(const char *name, const char *val) {
@@ -33,6 +36,8 @@ static void clear_test_env(const char *name) {
 #include <unistd.h>
 #define MKDIR(d) mkdir(d, 0755)
 #define RMDIR(d) rmdir(d)
+#define CHDIR(d) chdir(d)
+#define GETCWD(buf, sz) getcwd(buf, sz)
 static void set_test_env(const char *name, const char *val) {
     setenv(name, val ? val : "", 1);
 }
@@ -417,33 +422,102 @@ static void test_reset_to_original_baseline(void) {
 }
 
 static void test_resource_lookup_order_and_unrelated_cwd(void) {
-    printf("[TEST 13/15] Resource lookup order and independent directory resolution...\n");
+    printf("[TEST 13/15] Resource lookup order and unrelated CWD regression test...\n");
     fflush(stdout);
 
     char resolved[512] = {0};
 
-    /* Normal relative path */
+    /* 1. Normal relative path from repo root */
     bool ok1 = gui_model_resolve_resource_path("tests/scenarios/demo.txt", resolved, sizeof(resolved));
     assert(ok1);
     assert(strlen(resolved) > 0);
 
-    /* Test environment variable override */
+    /* 2. Environment variable override */
     set_test_env("RESOURCEGUARD_SCENARIOS_DIR", "tests/scenarios");
 
     char resolved_env[512] = {0};
     bool ok_env = gui_model_resolve_resource_path("demo.txt", resolved_env, sizeof(resolved_env));
     assert(ok_env);
 
-    /* Verify non-existent file does NOT silently substitute */
+    /* 3. Verify non-existent file does NOT silently substitute */
     char resolved_bad[512] = {0};
     bool ok_bad = gui_model_resolve_resource_path("non_existent_scenario_12345.txt", resolved_bad, sizeof(resolved_bad));
     assert(!ok_bad);
     assert(resolved_bad[0] == '\0');
 
-    /* Clear environment variable */
+    /* Clear environment variables before CWD test */
     clear_test_env("RESOURCEGUARD_SCENARIOS_DIR");
+    clear_test_env("RESOURCEGUARD_DATA_DIR");
 
-    printf("  -> Passed (lookup order verified, environment overrides work, non-existent rejected).\n");
+    /* 4. Genuine Unrelated Working Directory Regression Test
+     * Save original working directory, create a temporary directory outside the repo,
+     * chdir into it, verify executable-relative lookup succeeds with zero env overrides,
+     * load and validate the BankerState, verify safety, and cleanly restore CWD. */
+    char orig_cwd[1024] = {0};
+    assert(GETCWD(orig_cwd, sizeof(orig_cwd)) != NULL);
+
+    char tmp_dir_buf[512] = {0};
+#if defined(_WIN32)
+    char tmp_base[MAX_PATH] = {0};
+    GetTempPathA(sizeof(tmp_base), tmp_base);
+    snprintf(tmp_dir_buf, sizeof(tmp_dir_buf), "%srg_test_cwd_%lu", tmp_base, (unsigned long)GetCurrentProcessId());
+    _mkdir(tmp_dir_buf);
+#else
+    char tmp_template[] = "/tmp/rg_test_cwd_XXXXXX";
+    char *created = mkdtemp(tmp_template);
+    assert(created != NULL);
+    snprintf(tmp_dir_buf, sizeof(tmp_dir_buf), "%s", created);
+#endif
+
+    int chdir_res = CHDIR(tmp_dir_buf);
+    assert(chdir_res == 0);
+
+    /* Inside unrelated directory: verify tests/scenarios/demo.txt is NOT in local CWD */
+    FILE *local_check = fopen("tests/scenarios/demo.txt", "r");
+    assert(local_check == NULL); /* Proves CWD does NOT contain repository scenarios */
+
+    /* Resolution must succeed via executable-relative lookup */
+    char resolved_unrelated[512] = {0};
+    bool ok_unrelated = gui_model_resolve_resource_path("tests/scenarios/demo.txt",
+                                                        resolved_unrelated,
+                                                        sizeof(resolved_unrelated));
+
+    /* Load scenario from resolved path and verify state validity & safety */
+    GuiModel m;
+    gui_model_init(&m);
+    char err_buf[256] = {0};
+    bool loaded = false;
+    bool is_valid = false;
+    bool is_safe = false;
+
+    if (ok_unrelated) {
+        loaded = gui_model_load_scenario(&m, resolved_unrelated, err_buf, sizeof(err_buf));
+        if (loaded && m.is_loaded) {
+            int bad_p = -1, bad_r = -1;
+            if (banker_validate(&m.current_state, &bad_p, &bad_r) == BANKER_OK) {
+                is_valid = true;
+            }
+            int seq[BANKER_MAX_PROCS];
+            int seq_len = 0;
+            if (gui_model_is_safe(&m, seq, &seq_len, NULL) && seq_len == 5) {
+                is_safe = true;
+            }
+        }
+    }
+
+    /* Guaranteed restoration of original working directory and cleanup of temporary folder */
+    int restore_res = CHDIR(orig_cwd);
+    RMDIR(tmp_dir_buf);
+
+    /* Assertions checked after restoring directory and removing temp folder */
+    assert(restore_res == 0);
+    assert(ok_unrelated);
+    assert(strlen(resolved_unrelated) > 0);
+    assert(loaded);
+    assert(is_valid);
+    assert(is_safe);
+
+    printf("  -> Passed (genuine unrelated CWD resolution via executable-relative lookup verified).\n");
     fflush(stdout);
 }
 
