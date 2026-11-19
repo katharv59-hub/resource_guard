@@ -691,13 +691,36 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Verify Need and Available context is refreshed */
+    /* Verify Need and Available context is refreshed with exact authoritative values */
+    int cur_pid = (int)gtk_drop_down_get_selected(GTK_DROP_DOWN(rw->dropdown_proc));
+    if (cur_pid < 0 || cur_pid >= model->current_state.n) {
+        cur_pid = 0;
+    }
+
+    int all_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+    gui_model_get_current_need(model, all_need);
+
+    char expected_ctx_r0[128];
+    char expected_ctx_r1[128];
+    snprintf(expected_ctx_r0, sizeof(expected_ctx_r0), "Need: %d | Avail: %d",
+             all_need[cur_pid][0], model->current_state.available[0]);
+    snprintf(expected_ctx_r1, sizeof(expected_ctx_r1), "Need: %d | Avail: %d",
+             all_need[cur_pid][1], model->current_state.available[1]);
+
     const char *ctx_r0 = gtk_label_get_text(GTK_LABEL(rw->lbl_res_context[0]));
     const char *ctx_r1 = gtk_label_get_text(GTK_LABEL(rw->lbl_res_context[1]));
-    if (!strstr(ctx_r0, "Need:") || !strstr(ctx_r0, "Avail:") ||
-        !strstr(ctx_r1, "Need:") || !strstr(ctx_r1, "Avail:")) {
-        fprintf(stderr, "FAIL: Context labels for R0/R1 not refreshed with Need/Avail (R0: '%s', R1: '%s').\n",
-                ctx_r0, ctx_r1);
+
+    if (!ctx_r0 || strcmp(ctx_r0, expected_ctx_r0) != 0) {
+        fprintf(stderr, "FAIL: Context label for R0 mismatch for Process P%d.\n  Expected: '%s'\n  Actual:   '%s'\n",
+                cur_pid, expected_ctx_r0, ctx_r0 ? ctx_r0 : "<null>");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    if (!ctx_r1 || strcmp(ctx_r1, expected_ctx_r1) != 0) {
+        fprintf(stderr, "FAIL: Context label for R1 mismatch for Process P%d.\n  Expected: '%s'\n  Actual:   '%s'\n",
+                cur_pid, expected_ctx_r1, ctx_r1 ? ctx_r1 : "<null>");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
