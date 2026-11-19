@@ -1,10 +1,12 @@
 /* ResourceGuard GTK4 Smoke Test — implementation.
- * Performs rigorous headless verification of all 8 application foundation checks. */
+ * Performs rigorous headless verification of all 8 application foundation checks,
+ * including explicit mapping assertion and CSS parsing error auditing. */
 
 #include "smoke.h"
 #include "app.h"
 #include "window.h"
 #include "style.h"
+#include "model.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,20 +25,20 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     printf(" RESOURCEGUARD GTK4 SMOKE TEST (HEADLESS VERIFICATION)\n");
     printf("============================================================\n");
 
-    /* CHECK 7 (Early): GTK CSS Provider Initialization */
-    printf("[CHECK 1/8] Initializing GTK subsystem & CSS provider...\n");
+    /* CHECK 1: GTK Subsystem & CSS Provider Initialization */
+    printf("[CHECK 1/8] GTK Subsystem & CSS Provider Initialization (Zero Parse Errors)...\n");
     if (!gtk_init_check()) {
         fprintf(stderr, "FAIL: gtk_init_check() failed. Cannot connect to display.\n");
         return 1;
     }
 
-    if (!gui_style_init() || !gui_style_is_initialized()) {
-        fprintf(stderr, "FAIL: GTK CSS provider initialization failed.\n");
+    if (!gui_style_init() || !gui_style_is_initialized() || gui_style_has_parsing_error()) {
+        fprintf(stderr, "FAIL: GTK CSS provider initialization failed or reported parsing errors.\n");
         return 1;
     }
-    printf("  -> OK: GTK initialized and CSS provider loaded successfully.\n");
+    printf("  -> OK: GTK initialized and CSS provider loaded with 0 parsing errors.\n");
 
-    /* CHECK 1: GtkApplication Creation and Activation */
+    /* CHECK 2: GtkApplication Creation and Activation */
     printf("[CHECK 2/8] Creating and registering GtkApplication...\n");
     GtkApplication *app = gtk_application_new(
         "io.github.katharv59.resourceguard.smoke",
@@ -57,21 +59,33 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
     printf("  -> OK: GtkApplication created and registered successfully.\n");
 
-    /* CHECK 2: Main Application Window Creation */
-    printf("[CHECK 3/8] Building main GtkApplicationWindow...\n");
+    /* CHECK 3: Main Application Window Creation & Model Binding */
+    printf("[CHECK 3/8] Building main GtkApplicationWindow and verifying model binding...\n");
     GtkWidget *win = gui_window_new(app);
     if (!win || !GTK_IS_APPLICATION_WINDOW(win)) {
         fprintf(stderr, "FAIL: gui_window_new() did not produce a valid GtkApplicationWindow.\n");
         g_object_unref(app);
         return 1;
     }
-    printf("  -> OK: Main window created.\n");
 
-    /* CHECK 3: Window Visibility */
-    printf("[CHECK 4/8] Presenting window and asserting visibility...\n");
+    GuiModel *model = gui_window_get_model(win);
+    if (!model || !model->is_loaded) {
+        fprintf(stderr, "FAIL: Window does not have an active, loaded GuiModel bound.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    printf("  -> OK: Main window created and live GuiModel successfully bound (dim: %dp, %dr).\n",
+           model->current_state.n, model->current_state.m);
+
+    /* CHECK 4: Window Presentation, Visibility & Mapping (gtk_widget_get_mapped) */
+    printf("[CHECK 4/8] Presenting window and asserting visibility & mapped state (gtk_widget_get_mapped)...\n");
     gtk_window_present(GTK_WINDOW(win));
     gtk_widget_set_visible(win, TRUE);
-    process_pending_events();
+
+    for (int i = 0; i < 15; i++) {
+        process_pending_events();
+    }
 
     if (!gtk_widget_get_visible(win)) {
         fprintf(stderr, "FAIL: Window visibility check failed (gtk_widget_get_visible returned FALSE).\n");
@@ -79,9 +93,16 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
-    printf("  -> OK: Window is visible and mapped.\n");
 
-    /* CHECK 4: GtkStack Verification (Exactly 7 Pages) */
+    if (!gtk_widget_get_mapped(win)) {
+        fprintf(stderr, "FAIL: Window mapping check failed (gtk_widget_get_mapped returned FALSE).\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    printf("  -> OK: Window is confirmed visible and mapped to display.\n");
+
+    /* CHECK 5: GtkStack Verification (Exactly 7 Pages) */
     printf("[CHECK 5/8] Inspecting GtkStack page count...\n");
     GtkWidget *stack = gui_window_get_stack(win);
     if (!stack || !GTK_IS_STACK(stack)) {
@@ -108,7 +129,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
     printf("  -> OK: GtkStack contains exactly %u pages.\n", n_pages);
 
-    /* CHECK 5: All 7 Page Names Registered */
+    /* CHECK 6: All 7 Page Names Registered */
     printf("[CHECK 6/8] Verifying registration of all 7 page containers...\n");
     const char *expected_pages[7] = {
         "dashboard",
@@ -134,7 +155,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
     printf("  -> OK: All 7 page containers are registered.\n");
 
-    /* CHECK 6: Programmatic Page Switching */
+    /* CHECK 7: Programmatic Page Switching Across All Views */
     printf("[CHECK 7/8] Testing programmatic navigation across all 7 pages...\n");
     for (int i = 0; i < 7; i++) {
         gtk_stack_set_visible_child_name(GTK_STACK(stack), expected_pages[i]);

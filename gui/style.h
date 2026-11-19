@@ -6,5 +6,6 @@
 
 bool gui_style_init(void);
 bool gui_style_is_initialized(void);
+bool gui_style_has_parsing_error(void);
 
 #endif /* GUI_STYLE_H */

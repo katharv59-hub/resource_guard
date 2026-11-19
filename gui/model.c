@@ -1,0 +1,351 @@
+/* ResourceGuard Application Model & State Controller — implementation.
+ * Pure C11 model owning BankerState lifecycle, draft validation,
+ * scenario loading, and safety queries. */
+
+#include "model.h"
+#include <stdio.h>
+#include <string.h>
+
+static void extract_basename(const char *path, char *out, size_t out_len) {
+    if (!path || !out || out_len == 0) return;
+    const char *last_sep = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            last_sep = p;
+        }
+    }
+    const char *start = last_sep ? last_sep + 1 : path;
+    snprintf(out, out_len, "%s", start);
+}
+
+static void notify_change(GuiModel *m) {
+    if (m && m->listener) {
+        m->listener(m, m->listener_user_data);
+    }
+}
+
+void gui_model_init(GuiModel *m) {
+    if (!m) return;
+    memset(m, 0, sizeof(*m));
+    m->is_loaded = false;
+    m->state_version = 0;
+    m->scenario_path[0] = '\0';
+    snprintf(m->scenario_name, sizeof(m->scenario_name), "None (Empty State)");
+    m->draft_status = BANKER_OK;
+    m->draft_validation_msg[0] = '\0';
+}
+
+void gui_model_init_demo(GuiModel *m) {
+    if (!m) return;
+    gui_model_init(m);
+
+    /* Standard Banker 5x3 demonstration baseline */
+    BankerState s;
+    banker_init(&s, 5, 3);
+
+    s.total[0] = 10; s.total[1] = 5; s.total[2] = 7;
+    s.available[0] = 3; s.available[1] = 3; s.available[2] = 2;
+
+    int alloc[5][3] = {
+        {0, 1, 0},
+        {2, 0, 0},
+        {3, 0, 2},
+        {2, 1, 1},
+        {0, 0, 2}
+    };
+    int max_dem[5][3] = {
+        {7, 5, 3},
+        {3, 2, 2},
+        {9, 0, 2},
+        {2, 2, 2},
+        {4, 3, 3}
+    };
+
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 3; j++) {
+            s.alloc[i][j] = alloc[i][j];
+            s.max[i][j] = max_dem[i][j];
+        }
+    }
+
+    m->current_state = s;
+    m->original_state = s;
+    m->draft_state = s;
+    m->is_loaded = true;
+    m->state_version = 1;
+    snprintf(m->scenario_path, sizeof(m->scenario_path), "demo.txt");
+    snprintf(m->scenario_name, sizeof(m->scenario_name), "demo.txt (5 procs, 3 res)");
+
+    gui_model_validate_draft(m);
+    notify_change(m);
+}
+
+void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
+    if (!m) return;
+    m->listener = cb;
+    m->listener_user_data = user_data;
+}
+
+bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_t err_len) {
+    if (!m || !path) {
+        if (err_buf && err_len > 0) snprintf(err_buf, err_len, "Invalid argument to load_scenario");
+        return false;
+    }
+
+    BankerState loaded;
+    char parse_err[256] = {0};
+    if (!banker_load_scenario(path, &loaded, parse_err, sizeof(parse_err))) {
+        if (err_buf && err_len > 0) {
+            snprintf(err_buf, err_len, "Scenario parsing failed: %s", parse_err);
+        }
+        return false;
+    }
+
+    int bad_p = -1, bad_r = -1;
+    BankerStatus status = banker_validate(&loaded, &bad_p, &bad_r);
+    if (status != BANKER_OK) {
+        if (err_buf && err_len > 0) {
+            snprintf(err_buf, err_len, "Validation error: %s (proc=%d, res=%d)",
+                     banker_status_str(status), bad_p, bad_r);
+        }
+        return false;
+    }
+
+    /* Valid scenario loaded: commit to model */
+    m->current_state = loaded;
+    m->original_state = loaded;
+    m->draft_state = loaded;
+    m->is_loaded = true;
+    m->state_version++;
+
+    snprintf(m->scenario_path, sizeof(m->scenario_path), "%s", path);
+    extract_basename(path, m->scenario_name, sizeof(m->scenario_name));
+
+    gui_model_validate_draft(m);
+    notify_change(m);
+    return true;
+}
+
+bool gui_model_reset_to_original(GuiModel *m) {
+    if (!m || !m->is_loaded) return false;
+    m->current_state = m->original_state;
+    m->draft_state = m->original_state;
+    m->state_version++;
+    gui_model_validate_draft(m);
+    notify_change(m);
+    return true;
+}
+
+void gui_model_init_draft_from_current(GuiModel *m) {
+    if (!m) return;
+    m->draft_state = m->current_state;
+    gui_model_validate_draft(m);
+}
+
+bool gui_model_set_draft_dimensions(GuiModel *m, int n, int res_m) {
+    if (!m) return false;
+    if (n < 1 || n > BANKER_MAX_PROCS || res_m < 1 || res_m > BANKER_MAX_RES) {
+        return false;
+    }
+
+    int old_n = m->draft_state.n;
+    int old_m = m->draft_state.m;
+
+    m->draft_state.n = n;
+    m->draft_state.m = res_m;
+
+    /* Zero newly exposed resource fields if dimension expanded */
+    if (res_m > old_m) {
+        for (int j = old_m; j < res_m; j++) {
+            m->draft_state.total[j] = 0;
+            m->draft_state.available[j] = 0;
+            for (int i = 0; i < BANKER_MAX_PROCS; i++) {
+                m->draft_state.alloc[i][j] = 0;
+                m->draft_state.max[i][j] = 0;
+            }
+        }
+    }
+
+    /* Zero newly exposed process fields if dimension expanded */
+    if (n > old_n) {
+        for (int i = old_n; i < n; i++) {
+            for (int j = 0; j < BANKER_MAX_RES; j++) {
+                m->draft_state.alloc[i][j] = 0;
+                m->draft_state.max[i][j] = 0;
+            }
+        }
+    }
+
+    gui_model_validate_draft(m);
+    return true;
+}
+
+void gui_model_set_draft_total(GuiModel *m, int res, int val) {
+    if (!m || res < 0 || res >= BANKER_MAX_RES) return;
+    m->draft_state.total[res] = val;
+    gui_model_validate_draft(m);
+}
+
+void gui_model_set_draft_available(GuiModel *m, int res, int val) {
+    if (!m || res < 0 || res >= BANKER_MAX_RES) return;
+    m->draft_state.available[res] = val;
+    gui_model_validate_draft(m);
+}
+
+void gui_model_set_draft_alloc(GuiModel *m, int proc, int res, int val) {
+    if (!m || proc < 0 || proc >= BANKER_MAX_PROCS || res < 0 || res >= BANKER_MAX_RES) return;
+    m->draft_state.alloc[proc][res] = val;
+    gui_model_validate_draft(m);
+}
+
+void gui_model_set_draft_max(GuiModel *m, int proc, int res, int val) {
+    if (!m || proc < 0 || proc >= BANKER_MAX_PROCS || res < 0 || res >= BANKER_MAX_RES) return;
+    m->draft_state.max[proc][res] = val;
+    gui_model_validate_draft(m);
+}
+
+void gui_model_auto_calculate_draft_available(GuiModel *m) {
+    if (!m) return;
+    for (int j = 0; j < m->draft_state.m; j++) {
+        int sum_alloc = 0;
+        for (int i = 0; i < m->draft_state.n; i++) {
+            sum_alloc += m->draft_state.alloc[i][j];
+        }
+        int avail = m->draft_state.total[j] - sum_alloc;
+        if (avail < 0) avail = 0;
+        m->draft_state.available[j] = avail;
+    }
+    gui_model_validate_draft(m);
+}
+
+BankerStatus gui_model_validate_draft(GuiModel *m) {
+    if (!m) return BANKER_ERR_DIMENSIONS;
+
+    m->draft_bad_proc = -1;
+    m->draft_bad_res = -1;
+    m->draft_status = banker_validate(&m->draft_state, &m->draft_bad_proc, &m->draft_bad_res);
+
+    switch (m->draft_status) {
+        case BANKER_OK:
+            snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                     "Configuration is valid. Conservation laws and boundary conditions satisfied.");
+            break;
+        case BANKER_ERR_DIMENSIONS:
+            snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                     "Dimensions out of range: n=%d (must be 1-%d), m=%d (must be 1-%d)",
+                     m->draft_state.n, BANKER_MAX_PROCS, m->draft_state.m, BANKER_MAX_RES);
+            break;
+        case BANKER_ERR_NEGATIVE:
+            if (m->draft_bad_proc >= 0 && m->draft_bad_res >= 0) {
+                snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                         "Negative value found at Process P%d, Resource R%d",
+                         m->draft_bad_proc, m->draft_bad_res);
+            } else if (m->draft_bad_res >= 0) {
+                snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                         "Negative value in Total or Available vector for Resource R%d",
+                         m->draft_bad_res);
+            } else {
+                snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                         "Negative value detected in configuration");
+            }
+            break;
+        case BANKER_ERR_RANGE:
+            snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                     "Value exceeds BANKER_MAX_VALUE (%d)", BANKER_MAX_VALUE);
+            break;
+        case BANKER_ERR_ALLOC_GT_MAX:
+            snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                     "Allocation (%d) exceeds Maximum demand (%d) for Process P%d on Resource R%d",
+                     m->draft_state.alloc[m->draft_bad_proc][m->draft_bad_res],
+                     m->draft_state.max[m->draft_bad_proc][m->draft_bad_res],
+                     m->draft_bad_proc, m->draft_bad_res);
+            break;
+        case BANKER_ERR_MAX_GT_TOTAL:
+            snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                     "Maximum demand (%d) exceeds Total system capacity (%d) for Process P%d on Resource R%d",
+                     m->draft_state.max[m->draft_bad_proc][m->draft_bad_res],
+                     m->draft_state.total[m->draft_bad_res],
+                     m->draft_bad_proc, m->draft_bad_res);
+            break;
+        case BANKER_ERR_CONSERVATION: {
+            int j = m->draft_bad_res;
+            int sum_alloc = 0;
+            if (j >= 0 && j < m->draft_state.m) {
+                for (int i = 0; i < m->draft_state.n; i++) {
+                    sum_alloc += m->draft_state.alloc[i][j];
+                }
+                snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                         "Conservation violation on Resource R%d: Available (%d) + Alloc sum (%d) = %d != Total (%d)",
+                         j, m->draft_state.available[j], sum_alloc,
+                         m->draft_state.available[j] + sum_alloc, m->draft_state.total[j]);
+            } else {
+                snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                         "Conservation violation: Available + sum(Alloc) != Total");
+            }
+            break;
+        }
+        default:
+            snprintf(m->draft_validation_msg, sizeof(m->draft_validation_msg),
+                     "Unknown validation status: %d", m->draft_status);
+            break;
+    }
+
+    return m->draft_status;
+}
+
+bool gui_model_commit_draft(GuiModel *m) {
+    if (!m) return false;
+    if (gui_model_validate_draft(m) != BANKER_OK) {
+        return false;
+    }
+
+    m->current_state = m->draft_state;
+    if (!m->is_loaded) {
+        m->original_state = m->draft_state;
+        m->is_loaded = true;
+        snprintf(m->scenario_name, sizeof(m->scenario_name), "Manual Configuration (%dp, %dr)",
+                 m->current_state.n, m->current_state.m);
+    }
+    m->state_version++;
+
+    notify_change(m);
+    return true;
+}
+
+void gui_model_get_current_need(const GuiModel *m, int need[BANKER_MAX_PROCS][BANKER_MAX_RES]) {
+    if (!m || !need) return;
+    banker_need(&m->current_state, need);
+}
+
+void gui_model_get_draft_need(const GuiModel *m, int need[BANKER_MAX_PROCS][BANKER_MAX_RES]) {
+    if (!m || !need) return;
+    banker_need(&m->draft_state, need);
+}
+
+bool gui_model_is_safe(const GuiModel *m, int seq[], int *seq_len, Trace *trace) {
+    if (!m || !m->is_loaded) return false;
+    return banker_is_safe(&m->current_state, seq, seq_len, trace);
+}
+
+void gui_model_get_dashboard_snapshot(const GuiModel *m, GuiDashboardSnapshot *out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!m || !m->is_loaded) {
+        snprintf(out->scenario_name, sizeof(out->scenario_name), "None (Empty State)");
+        return;
+    }
+
+    out->n = m->current_state.n;
+    out->m = m->current_state.m;
+    for (int j = 0; j < out->m; j++) {
+        out->total[j] = m->current_state.total[j];
+        out->available[j] = m->current_state.available[j];
+    }
+
+    out->is_loaded = m->is_loaded;
+    out->state_version = m->state_version;
+    snprintf(out->scenario_name, sizeof(out->scenario_name), "%s", m->scenario_name);
+    snprintf(out->scenario_path, sizeof(out->scenario_path), "%s", m->scenario_path);
+
+    out->is_safe = banker_is_safe(&m->current_state, out->safe_seq, &out->safe_seq_len, NULL);
+}

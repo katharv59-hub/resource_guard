@@ -1,13 +1,14 @@
 /* ResourceGuard GTK4 Page Containers.
- * Pure presentation layer — provides structured layouts for the 7 application views. */
+ * Presentation layer — provides interactive layouts for all 7 application views. */
 
 #ifndef GUI_PAGES_H
 #define GUI_PAGES_H
 
 #include <gtk/gtk.h>
+#include "model.h"
 
-GtkWidget *gui_page_dashboard_create(void);
-GtkWidget *gui_page_resources_create(void);
+GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window);
+GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window);
 GtkWidget *gui_page_safety_create(void);
 GtkWidget *gui_page_simulator_create(void);
 GtkWidget *gui_page_whynot_create(void);

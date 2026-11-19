@@ -11,8 +11,8 @@ THDR   = engine/threading.h
 # GUI module (GTK4 — Linux only)
 GTK_CFLAGS ?= $(shell pkg-config --cflags gtk4 2>/dev/null)
 GTK_LIBS   ?= $(shell pkg-config --libs gtk4 2>/dev/null)
-GUI_SRCS    = gui/main.c gui/app.c gui/window.c gui/pages.c gui/style.c gui/smoke.c
-GUI_HDRS    = gui/app.h gui/window.h gui/pages.h gui/style.h gui/smoke.h
+GUI_SRCS    = gui/main.c gui/app.c gui/window.c gui/pages.c gui/style.c gui/smoke.c gui/model.c
+GUI_HDRS    = gui/app.h gui/window.h gui/pages.h gui/style.h gui/smoke.h gui/model.h
 GUI_BIN     = resourceguard_gui
 
 all: banker_cli test_banker
@@ -64,6 +64,11 @@ test_threads_sanitize:
 		tests/test_threading.c $(ENGINE) $(THREAD) -o test_threading_asan
 	./test_threading_asan
 
+# --- Application Model / State Controller target (pure C11) ---
+test_model: tests/test_model.c gui/model.c $(ENGINE) $(HDRS) gui/model.h
+	$(CC) $(CFLAGS) -Igui tests/test_model.c gui/model.c $(ENGINE) -o $@
+	./test_model
+
 # --- GTK4 Desktop Application target (Linux only) ---
 gui: $(GUI_BIN)
 
@@ -76,7 +81,7 @@ test_gui: $(GUI_BIN)
 clean:
 	rm -f banker_cli test_banker test_banker_asan test_banker_ubsan \
 	      test_threading test_threading_asan test_threading_ubsan test_threading_tsan \
-	      $(GUI_BIN)
+	      test_model $(GUI_BIN)
 
-.PHONY: all test ubsan sanitize demo clean gui test_gui \
+.PHONY: all test ubsan sanitize demo clean gui test_gui test_model \
         test_threads test_threads_ubsan tsan test_threads_sanitize

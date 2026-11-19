@@ -1,62 +1,63 @@
 /* ResourceGuard GTK4 Page Containers — implementation.
- * Builds structured layouts for all 7 application pages.
- * Unavailable features are explicitly labeled as pending implementation. */
+ * Provides interactive resource matrix editing, live Need derivation,
+ * validation feedback, scenario loading, and dashboard telemetry. */
 
 #include "pages.h"
+#include "window.h"
+#include "model.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------ */
-/*  Reusable layout helpers                                            */
+/*  Reusable Layout Helpers                                            */
 /* ------------------------------------------------------------------ */
-
-static GtkWidget *create_badge(const char *text, const char *css_class) {
-    GtkWidget *label = gtk_label_new(text);
-    gtk_widget_add_css_class(label, "badge");
-    if (css_class && *css_class)
-        gtk_widget_add_css_class(label, css_class);
-    return label;
-}
 
 static GtkWidget *create_card(const char *title, const char *subtitle) {
-    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(card, "card");
 
-    if (title && *title) {
+    if (title) {
         GtkWidget *t = gtk_label_new(title);
-        gtk_label_set_xalign(GTK_LABEL(t), 0.0f);
         gtk_widget_add_css_class(t, "card-title");
+        gtk_label_set_xalign(GTK_LABEL(t), 0.0f);
         gtk_box_append(GTK_BOX(card), t);
     }
-
-    if (subtitle && *subtitle) {
+    if (subtitle) {
         GtkWidget *s = gtk_label_new(subtitle);
-        gtk_label_set_xalign(GTK_LABEL(s), 0.0f);
-        gtk_label_set_wrap(GTK_LABEL(s), TRUE);
         gtk_widget_add_css_class(s, "card-subtitle");
+        gtk_label_set_xalign(GTK_LABEL(s), 0.0f);
         gtk_box_append(GTK_BOX(card), s);
     }
-
     return card;
 }
 
-static GtkWidget *create_placeholder_banner(const char *feature_name,
-                                           const char *milestone_target) {
-    GtkWidget *banner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+static GtkWidget *create_badge(const char *text, const char *css_class) {
+    GtkWidget *badge = gtk_label_new(text);
+    gtk_widget_add_css_class(badge, "badge");
+    if (css_class) {
+        gtk_widget_add_css_class(badge, css_class);
+    }
+    return badge;
+}
+
+static GtkWidget *create_placeholder_banner(const char *title, const char *target_milestone) {
+    GtkWidget *banner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_add_css_class(banner, "placeholder-banner");
 
-    char buf[256];
-    g_snprintf(buf, sizeof(buf), "[Pending Integration] %s", feature_name);
-    GtkWidget *t = gtk_label_new(buf);
-    gtk_label_set_xalign(GTK_LABEL(t), 0.0f);
-    gtk_widget_add_css_class(t, "badge-amber");
-    gtk_widget_add_css_class(t, "badge");
-    gtk_box_append(GTK_BOX(banner), t);
+    char header_buf[128];
+    snprintf(header_buf, sizeof(header_buf), "[Pending Integration] %s", title);
+    GtkWidget *h = gtk_label_new(header_buf);
+    gtk_widget_add_css_class(h, "card-title");
+    gtk_label_set_xalign(GTK_LABEL(h), 0.0f);
+    gtk_box_append(GTK_BOX(banner), h);
 
-    g_snprintf(buf, sizeof(buf),
-               "Scheduled for implementation in %s. Underlying engine algorithms and data structures are verified.",
-               milestone_target);
-    GtkWidget *desc = gtk_label_new(buf);
+    char desc_buf[256];
+    snprintf(desc_buf, sizeof(desc_buf),
+             "This interactive subsystem is scheduled for %s. Backend engine hooks are prepared.",
+             target_milestone);
+    GtkWidget *desc = gtk_label_new(desc_buf);
     gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
     gtk_widget_add_css_class(desc, "placeholder-text");
     gtk_box_append(GTK_BOX(banner), desc);
 
@@ -74,252 +75,844 @@ static GtkWidget *wrap_in_scrolled_window(GtkWidget *content_box) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  1. Dashboard Page                                                  */
+/*  1. Dashboard Page (Live Telemetry & Safety State)                  */
 /* ------------------------------------------------------------------ */
 
-GtkWidget *gui_page_dashboard_create(void) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+typedef struct {
+    GuiModel  *model;
+    GtkWidget *window;
+
+    GtkWidget *empty_box;
+    GtkWidget *content_box;
+
+    /* Header Badges */
+    GtkWidget *badge_safety;
+    GtkWidget *badge_version;
+    GtkWidget *badge_dim;
+
+    /* Telemetry Labels */
+    GtkWidget *label_source;
+    GtkWidget *label_safety_title;
+    GtkWidget *label_safety_seq;
+    GtkWidget *label_safety_desc;
+    GtkWidget *label_total_vec;
+    GtkWidget *label_avail_vec;
+} DashboardWidgets;
+
+static void dashboard_refresh(DashboardWidgets *w) {
+    if (!w || !w->model) return;
+
+    GuiDashboardSnapshot snap;
+    gui_model_get_dashboard_snapshot(w->model, &snap);
+
+    if (!snap.is_loaded) {
+        gtk_widget_set_visible(w->empty_box, TRUE);
+        gtk_widget_set_visible(w->content_box, FALSE);
+        return;
+    }
+
+    gtk_widget_set_visible(w->empty_box, FALSE);
+    gtk_widget_set_visible(w->content_box, TRUE);
+
+    /* Update Header Badges */
+    if (snap.is_safe) {
+        gtk_label_set_text(GTK_LABEL(w->badge_safety), "STATUS: SAFE STATE");
+        gtk_widget_remove_css_class(w->badge_safety, "badge-rose");
+        gtk_widget_add_css_class(w->badge_safety, "badge-emerald");
+    } else {
+        gtk_label_set_text(GTK_LABEL(w->badge_safety), "STATUS: UNSAFE STATE");
+        gtk_widget_remove_css_class(w->badge_safety, "badge-emerald");
+        gtk_widget_add_css_class(w->badge_safety, "badge-rose");
+    }
+
+    char ver_buf[64];
+    snprintf(ver_buf, sizeof(ver_buf), "State: v%llu", (unsigned long long)snap.state_version);
+    gtk_label_set_text(GTK_LABEL(w->badge_version), ver_buf);
+
+    char dim_buf[64];
+    snprintf(dim_buf, sizeof(dim_buf), "%d Processes x %d Resources", snap.n, snap.m);
+    gtk_label_set_text(GTK_LABEL(w->badge_dim), dim_buf);
+
+    /* Update Source Info */
+    char src_buf[256];
+    snprintf(src_buf, sizeof(src_buf), "Scenario: %s  |  Source: %s",
+             snap.scenario_name,
+             snap.scenario_path[0] ? snap.scenario_path : "[Direct Edit]");
+    gtk_label_set_text(GTK_LABEL(w->label_source), src_buf);
+
+    /* Update Safety Section */
+    if (snap.is_safe) {
+        gtk_label_set_text(GTK_LABEL(w->label_safety_title), "Safe Execution Sequence Verified:");
+        char seq_buf[256] = "< ";
+        for (int i = 0; i < snap.safe_seq_len; i++) {
+            char p_buf[16];
+            snprintf(p_buf, sizeof(p_buf), "%sP%d", (i > 0 ? " -> " : ""), snap.safe_seq[i]);
+            strncat(seq_buf, p_buf, sizeof(seq_buf) - strlen(seq_buf) - 1);
+        }
+        strncat(seq_buf, " >", sizeof(seq_buf) - strlen(seq_buf) - 1);
+        gtk_label_set_text(GTK_LABEL(w->label_safety_seq), seq_buf);
+        gtk_label_set_text(GTK_LABEL(w->label_safety_desc),
+                           "All processes can acquire their maximum declared demand and terminate safely without deadlock.");
+    } else {
+        gtk_label_set_text(GTK_LABEL(w->label_safety_title), "Deadlock Inevitable / Unsafe Allocation:");
+        gtk_label_set_text(GTK_LABEL(w->label_safety_seq), "< No Safe Execution Sequence Exists >");
+        gtk_label_set_text(GTK_LABEL(w->label_safety_desc),
+                           "Current resource allocations cannot guarantee process completion without potential deadlock.");
+    }
+
+    /* Update Total Vector */
+    char total_buf[256] = "";
+    for (int j = 0; j < snap.m; j++) {
+        char item[32];
+        snprintf(item, sizeof(item), "R%d: %-3d   ", j, snap.total[j]);
+        strncat(total_buf, item, sizeof(total_buf) - strlen(total_buf) - 1);
+    }
+    gtk_label_set_text(GTK_LABEL(w->label_total_vec), total_buf);
+
+    /* Update Available Vector */
+    char avail_buf[256] = "";
+    for (int j = 0; j < snap.m; j++) {
+        char item[32];
+        snprintf(item, sizeof(item), "R%d: %-3d   ", j, snap.available[j]);
+        strncat(avail_buf, item, sizeof(avail_buf) - strlen(avail_buf) - 1);
+    }
+    gtk_label_set_text(GTK_LABEL(w->label_avail_vec), avail_buf);
+}
+
+static void on_dashboard_model_changed(GuiModel *model, void *user_data) {
+    (void)model;
+    dashboard_refresh((DashboardWidgets *)user_data);
+}
+
+static void on_dashboard_map(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    dashboard_refresh((DashboardWidgets *)user_data);
+}
+
+static void on_dash_goto_resources(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    DashboardWidgets *w = (DashboardWidgets *)user_data;
+    gui_window_switch_to_page(w->window, "resources");
+}
+
+static void on_dash_load_demo(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    DashboardWidgets *w = (DashboardWidgets *)user_data;
+    gui_model_init_demo(w->model);
+}
+
+static void on_dash_reset_baseline(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    DashboardWidgets *w = (DashboardWidgets *)user_data;
+    gui_model_reset_to_original(w->model);
+}
+
+GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window) {
+    DashboardWidgets *w = g_new0(DashboardWidgets, 1);
+    w->model = model;
+    w->window = window;
+
+    GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, g_free);
+    g_signal_connect(page_box, "map", G_CALLBACK(on_dashboard_map), w);
 
     /* Header Card */
     GtkWidget *header_card = create_card("System Dashboard",
-                                         "High-level resource telemetry, safety status, and quick simulation actions.");
+                                         "Real-time BankerState telemetry, dimensional bounds, and algorithmic safety status.");
     GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("M3 Foundation", "badge-teal"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("C11 / GTK4 Native", "badge-muted"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Engine Ready", "badge-emerald"));
+    w->badge_safety = create_badge("STATUS: SAFE STATE", "badge-emerald");
+    w->badge_version = create_badge("State: v1", "badge-teal");
+    w->badge_dim = create_badge("5 Processes x 3 Resources", "badge-muted");
+    gtk_box_append(GTK_BOX(badge_box), w->badge_safety);
+    gtk_box_append(GTK_BOX(badge_box), w->badge_version);
+    gtk_box_append(GTK_BOX(badge_box), w->badge_dim);
     gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
+    gtk_box_append(GTK_BOX(page_box), header_card);
 
-    /* Overview Status Card */
-    GtkWidget *status_card = create_card("System Architecture & Reference Overview",
-                                         "Structural overview of the planned simulator integration.");
-    GtkWidget *badge_ref = create_badge("Reference Model — Live Binding Pending (M4)", "badge-amber");
-    gtk_box_append(GTK_BOX(status_card), badge_ref);
+    /* Empty State Container */
+    w->empty_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_add_css_class(w->empty_box, "empty-state-box");
+    GtkWidget *empty_title = gtk_label_new("No Active Resource Configuration");
+    gtk_widget_add_css_class(empty_title, "empty-state-title");
+    GtkWidget *empty_sub = gtk_label_new("No scenario is currently loaded into the simulator.\n"
+                                         "Load a benchmark scenario file or configure matrices manually in System Resources.");
+    gtk_widget_add_css_class(empty_sub, "empty-state-subtitle");
+    gtk_box_append(GTK_BOX(w->empty_box), empty_title);
+    gtk_box_append(GTK_BOX(w->empty_box), empty_sub);
 
-    GtkWidget *body_label = gtk_label_new(
-        "Demonstration Baseline Specification:\n"
-        "  * Target Model: 5 processes, 3 resource types (Standard Banker Demonstration)\n"
-        "  * Engine Core: Verified independent C11 engine (24,092 tests passed, 0 failures)\n"
-        "  * Concurrency: POSIX threads simulation engine verified (TSan clean)\n\n"
-        "[Notice] Live BankerState data binding is scheduled for Milestone 4 integration.\n"
-        "No live process or resource metrics are currently active.");
-    gtk_label_set_xalign(GTK_LABEL(body_label), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(body_label), TRUE);
-    gtk_widget_add_css_class(body_label, "card-body");
-    gtk_box_append(GTK_BOX(status_card), body_label);
+    GtkWidget *empty_btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *btn_demo = gtk_button_new_with_label("Load Demo Baseline (5p, 3r)");
+    gtk_widget_add_css_class(btn_demo, "primary");
+    g_signal_connect(btn_demo, "clicked", G_CALLBACK(on_dash_load_demo), w);
+    GtkWidget *btn_res = gtk_button_new_with_label("Open System Resources Matrix");
+    g_signal_connect(btn_res, "clicked", G_CALLBACK(on_dash_goto_resources), w);
+    gtk_box_append(GTK_BOX(empty_btn_box), btn_demo);
+    gtk_box_append(GTK_BOX(empty_btn_box), btn_res);
+    gtk_box_append(GTK_BOX(w->empty_box), empty_btn_box);
+    gtk_box_append(GTK_BOX(page_box), w->empty_box);
 
-    gtk_box_append(GTK_BOX(status_card),
-                   create_placeholder_banner("Live Telemetry & Dashboard Widgets", "Milestone 4"));
-    gtk_box_append(GTK_BOX(box), status_card);
+    /* Content Container */
+    w->content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
 
-    return wrap_in_scrolled_window(box);
+    /* Safety Status Card */
+    GtkWidget *safety_card = create_card("Safety Analysis & Execution Feasibility",
+                                         "Evaluates if an execution order exists guaranteeing all processes satisfy max demand.");
+    w->label_safety_title = gtk_label_new("Safe Execution Sequence Verified:");
+    gtk_widget_add_css_class(w->label_safety_title, "card-title");
+    gtk_label_set_xalign(GTK_LABEL(w->label_safety_title), 0.0f);
+    gtk_box_append(GTK_BOX(safety_card), w->label_safety_title);
+
+    w->label_safety_seq = gtk_label_new("< P1 -> P3 -> P4 -> P0 -> P2 >");
+    gtk_widget_add_css_class(w->label_safety_seq, "mono-text");
+    gtk_label_set_xalign(GTK_LABEL(w->label_safety_seq), 0.0f);
+    gtk_box_append(GTK_BOX(safety_card), w->label_safety_seq);
+
+    w->label_safety_desc = gtk_label_new("");
+    gtk_widget_add_css_class(w->label_safety_desc, "card-body");
+    gtk_label_set_xalign(GTK_LABEL(w->label_safety_desc), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(w->label_safety_desc), TRUE);
+    gtk_box_append(GTK_BOX(safety_card), w->label_safety_desc);
+    gtk_box_append(GTK_BOX(w->content_box), safety_card);
+
+    /* Vectors Summary Card */
+    GtkWidget *vec_card = create_card("Resource Vectors Telemetry",
+                                      "Global resource bounds and available unallocated instances.");
+    GtkWidget *lbl_t_title = gtk_label_new("Total Resource Capacity Vector (Total[j]):");
+    gtk_label_set_xalign(GTK_LABEL(lbl_t_title), 0.0f);
+    gtk_widget_add_css_class(lbl_t_title, "card-subtitle");
+    gtk_box_append(GTK_BOX(vec_card), lbl_t_title);
+
+    w->label_total_vec = gtk_label_new("");
+    gtk_widget_add_css_class(w->label_total_vec, "mono-text");
+    gtk_label_set_xalign(GTK_LABEL(w->label_total_vec), 0.0f);
+    gtk_box_append(GTK_BOX(vec_card), w->label_total_vec);
+
+    GtkWidget *lbl_a_title = gtk_label_new("Available Unallocated Vector (Available[j]):");
+    gtk_label_set_xalign(GTK_LABEL(lbl_a_title), 0.0f);
+    gtk_widget_add_css_class(lbl_a_title, "card-subtitle");
+    gtk_box_append(GTK_BOX(vec_card), lbl_a_title);
+
+    w->label_avail_vec = gtk_label_new("");
+    gtk_widget_add_css_class(w->label_avail_vec, "mono-text");
+    gtk_label_set_xalign(GTK_LABEL(w->label_avail_vec), 0.0f);
+    gtk_box_append(GTK_BOX(vec_card), w->label_avail_vec);
+    gtk_box_append(GTK_BOX(w->content_box), vec_card);
+
+    /* Source & Quick Actions Card */
+    GtkWidget *action_card = create_card("Configuration Source & Simulator Controls",
+                                         "Quick actions to reconfigure, load scenarios, or reset state.");
+    w->label_source = gtk_label_new("");
+    gtk_widget_add_css_class(w->label_source, "card-body");
+    gtk_label_set_xalign(GTK_LABEL(w->label_source), 0.0f);
+    gtk_box_append(GTK_BOX(action_card), w->label_source);
+
+    GtkWidget *act_btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *b_edit = gtk_button_new_with_label("Edit Resources Matrix");
+    gtk_widget_add_css_class(b_edit, "primary");
+    g_signal_connect(b_edit, "clicked", G_CALLBACK(on_dash_goto_resources), w);
+
+    GtkWidget *b_reset = gtk_button_new_with_label("Reset to Baseline");
+    g_signal_connect(b_reset, "clicked", G_CALLBACK(on_dash_reset_baseline), w);
+
+    gtk_box_append(GTK_BOX(act_btn_box), b_edit);
+    gtk_box_append(GTK_BOX(act_btn_box), b_reset);
+    gtk_box_append(GTK_BOX(action_card), act_btn_box);
+    gtk_box_append(GTK_BOX(w->content_box), action_card);
+
+    gtk_box_append(GTK_BOX(page_box), w->content_box);
+
+    /* Register listener and initial refresh */
+    gui_model_set_listener(model, on_dashboard_model_changed, w);
+    dashboard_refresh(w);
+
+    return wrap_in_scrolled_window(page_box);
 }
 
 /* ------------------------------------------------------------------ */
-/*  2. System Resources Page                                           */
+/*  2. System Resources Page (Matrix Editor & Validation)              */
 /* ------------------------------------------------------------------ */
 
-GtkWidget *gui_page_resources_create(void) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+typedef struct {
+    GuiModel  *model;
+    GtkWidget *window;
+
+    /* Dimension Controls */
+    GtkWidget *spin_n;
+    GtkWidget *spin_m;
+
+    /* Vectors Grid */
+    GtkWidget *box_vectors;
+    GtkWidget *grid_vectors;
+    GtkWidget *spin_total[BANKER_MAX_RES];
+    GtkWidget *spin_available[BANKER_MAX_RES];
+
+    /* Allocation Matrix */
+    GtkWidget *grid_alloc;
+    GtkWidget *spin_alloc[BANKER_MAX_PROCS][BANKER_MAX_RES];
+
+    /* Maximum Matrix */
+    GtkWidget *grid_max;
+    GtkWidget *spin_max[BANKER_MAX_PROCS][BANKER_MAX_RES];
+
+    /* Need Matrix (Read-Only) */
+    GtkWidget *grid_need;
+    GtkWidget *label_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+
+    /* Validation & Commit */
+    GtkWidget *banner_box;
+    GtkWidget *banner_label;
+    GtkWidget *badge_status;
+    GtkWidget *btn_commit;
+    GtkWidget *btn_discard;
+
+    bool updating_ui;
+} ResourcesWidgets;
+
+static void update_validation_display(ResourcesWidgets *w) {
+    if (!w || !w->model) return;
+
+    BankerStatus status = gui_model_validate_draft(w->model);
+
+    gtk_label_set_text(GTK_LABEL(w->banner_label), w->model->draft_validation_msg);
+
+    if (status == BANKER_OK) {
+        gtk_widget_remove_css_class(w->banner_box, "error-banner");
+        gtk_widget_add_css_class(w->banner_box, "valid-banner");
+        gtk_widget_set_sensitive(w->btn_commit, TRUE);
+        gtk_label_set_text(GTK_LABEL(w->badge_status), "DRAFT VALID");
+        gtk_widget_remove_css_class(w->badge_status, "badge-rose");
+        gtk_widget_remove_css_class(w->badge_status, "badge-amber");
+        gtk_widget_add_css_class(w->badge_status, "badge-emerald");
+    } else {
+        gtk_widget_remove_css_class(w->banner_box, "valid-banner");
+        gtk_widget_add_css_class(w->banner_box, "error-banner");
+        gtk_widget_set_sensitive(w->btn_commit, FALSE);
+        gtk_label_set_text(GTK_LABEL(w->badge_status), "INVALID DRAFT");
+        gtk_widget_remove_css_class(w->badge_status, "badge-emerald");
+        gtk_widget_remove_css_class(w->badge_status, "badge-amber");
+        gtk_widget_add_css_class(w->badge_status, "badge-rose");
+    }
+}
+
+static void on_alloc_cell_changed(GtkSpinButton *spin, gpointer user_data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (w->updating_ui) return;
+
+    int p = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(spin), "proc"));
+    int r = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(spin), "res"));
+    int val = gtk_spin_button_get_value_as_int(spin);
+
+    gui_model_set_draft_alloc(w->model, p, r, val);
+
+    /* Update derived Need cell */
+    int need_val = w->model->draft_state.max[p][r] - val;
+    char n_buf[32];
+    snprintf(n_buf, sizeof(n_buf), "%d", need_val);
+    if (w->label_need[p][r]) {
+        gtk_label_set_text(GTK_LABEL(w->label_need[p][r]), n_buf);
+    }
+
+    update_validation_display(w);
+}
+
+static void on_max_cell_changed(GtkSpinButton *spin, gpointer user_data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (w->updating_ui) return;
+
+    int p = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(spin), "proc"));
+    int r = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(spin), "res"));
+    int val = gtk_spin_button_get_value_as_int(spin);
+
+    gui_model_set_draft_max(w->model, p, r, val);
+
+    /* Update derived Need cell */
+    int need_val = val - w->model->draft_state.alloc[p][r];
+    char n_buf[32];
+    snprintf(n_buf, sizeof(n_buf), "%d", need_val);
+    if (w->label_need[p][r]) {
+        gtk_label_set_text(GTK_LABEL(w->label_need[p][r]), n_buf);
+    }
+
+    update_validation_display(w);
+}
+
+static void on_total_cell_changed(GtkSpinButton *spin, gpointer user_data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (w->updating_ui) return;
+
+    int r = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(spin), "res"));
+    int val = gtk_spin_button_get_value_as_int(spin);
+
+    gui_model_set_draft_total(w->model, r, val);
+    update_validation_display(w);
+}
+
+static void on_available_cell_changed(GtkSpinButton *spin, gpointer user_data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (w->updating_ui) return;
+
+    int r = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(spin), "res"));
+    int val = gtk_spin_button_get_value_as_int(spin);
+
+    gui_model_set_draft_available(w->model, r, val);
+    update_validation_display(w);
+}
+
+static void rebuild_matrix_grids(ResourcesWidgets *w) {
+    w->updating_ui = true;
+    int n = w->model->draft_state.n;
+    int m = w->model->draft_state.m;
+
+    /* ---- 1. Rebuild Vectors Grid (Total & Available) ---- */
+    while (gtk_widget_get_first_child(w->grid_vectors)) {
+        gtk_grid_remove_row(GTK_GRID(w->grid_vectors), 0);
+    }
+
+    GtkWidget *lbl_hdr_tot = gtk_label_new("Total Vector");
+    gtk_widget_add_css_class(lbl_hdr_tot, "matrix-header-proc");
+    gtk_grid_attach(GTK_GRID(w->grid_vectors), lbl_hdr_tot, 0, 0, 1, 1);
+
+    GtkWidget *lbl_hdr_av = gtk_label_new("Available Vector");
+    gtk_widget_add_css_class(lbl_hdr_av, "matrix-header-proc");
+    gtk_grid_attach(GTK_GRID(w->grid_vectors), lbl_hdr_av, 0, 1, 1, 1);
+
+    for (int j = 0; j < m; j++) {
+        char r_name[16];
+        snprintf(r_name, sizeof(r_name), "R%d", j);
+
+        /* Total spin */
+        w->spin_total[j] = gtk_spin_button_new_with_range(0, BANKER_MAX_VALUE, 1);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_total[j]), w->model->draft_state.total[j]);
+        g_object_set_data(G_OBJECT(w->spin_total[j]), "res", GINT_TO_POINTER(j));
+        g_signal_connect(w->spin_total[j], "value-changed", G_CALLBACK(on_total_cell_changed), w);
+        gtk_grid_attach(GTK_GRID(w->grid_vectors), w->spin_total[j], j + 1, 0, 1, 1);
+
+        /* Available spin */
+        w->spin_available[j] = gtk_spin_button_new_with_range(0, BANKER_MAX_VALUE, 1);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_available[j]), w->model->draft_state.available[j]);
+        g_object_set_data(G_OBJECT(w->spin_available[j]), "res", GINT_TO_POINTER(j));
+        g_signal_connect(w->spin_available[j], "value-changed", G_CALLBACK(on_available_cell_changed), w);
+        gtk_grid_attach(GTK_GRID(w->grid_vectors), w->spin_available[j], j + 1, 1, 1);
+    }
+
+    /* ---- 2. Helper Lambda / Rebuilder for Allocation Grid ---- */
+    while (gtk_widget_get_first_child(w->grid_alloc)) {
+        gtk_grid_remove_row(GTK_GRID(w->grid_alloc), 0);
+    }
+    for (int j = 0; j < m; j++) {
+        char r_name[16];
+        snprintf(r_name, sizeof(r_name), "R%d", j);
+        GtkWidget *hdr = gtk_label_new(r_name);
+        gtk_widget_add_css_class(hdr, "matrix-header-res");
+        gtk_grid_attach(GTK_GRID(w->grid_alloc), hdr, j + 1, 0, 1, 1);
+    }
+    for (int i = 0; i < n; i++) {
+        char p_name[16];
+        snprintf(p_name, sizeof(p_name), "P%d", i);
+        GtkWidget *hdr = gtk_label_new(p_name);
+        gtk_widget_add_css_class(hdr, "matrix-header-proc");
+        gtk_grid_attach(GTK_GRID(w->grid_alloc), hdr, 0, i + 1, 1, 1);
+
+        for (int j = 0; j < m; j++) {
+            w->spin_alloc[i][j] = gtk_spin_button_new_with_range(0, BANKER_MAX_VALUE, 1);
+            gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_alloc[i][j]), w->model->draft_state.alloc[i][j]);
+            g_object_set_data(G_OBJECT(w->spin_alloc[i][j]), "proc", GINT_TO_POINTER(i));
+            g_object_set_data(G_OBJECT(w->spin_alloc[i][j]), "res", GINT_TO_POINTER(j));
+            g_signal_connect(w->spin_alloc[i][j], "value-changed", G_CALLBACK(on_alloc_cell_changed), w);
+            gtk_grid_attach(GTK_GRID(w->grid_alloc), w->spin_alloc[i][j], j + 1, i + 1, 1, 1);
+        }
+    }
+
+    /* ---- 3. Helper Lambda / Rebuilder for Maximum Grid ---- */
+    while (gtk_widget_get_first_child(w->grid_max)) {
+        gtk_grid_remove_row(GTK_GRID(w->grid_max), 0);
+    }
+    for (int j = 0; j < m; j++) {
+        char r_name[16];
+        snprintf(r_name, sizeof(r_name), "R%d", j);
+        GtkWidget *hdr = gtk_label_new(r_name);
+        gtk_widget_add_css_class(hdr, "matrix-header-res");
+        gtk_grid_attach(GTK_GRID(w->grid_max), hdr, j + 1, 0, 1, 1);
+    }
+    for (int i = 0; i < n; i++) {
+        char p_name[16];
+        snprintf(p_name, sizeof(p_name), "P%d", i);
+        GtkWidget *hdr = gtk_label_new(p_name);
+        gtk_widget_add_css_class(hdr, "matrix-header-proc");
+        gtk_grid_attach(GTK_GRID(w->grid_max), hdr, 0, i + 1, 1, 1);
+
+        for (int j = 0; j < m; j++) {
+            w->spin_max[i][j] = gtk_spin_button_new_with_range(0, BANKER_MAX_VALUE, 1);
+            gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_max[i][j]), w->model->draft_state.max[i][j]);
+            g_object_set_data(G_OBJECT(w->spin_max[i][j]), "proc", GINT_TO_POINTER(i));
+            g_object_set_data(G_OBJECT(w->spin_max[i][j]), "res", GINT_TO_POINTER(j));
+            g_signal_connect(w->spin_max[i][j], "value-changed", G_CALLBACK(on_max_cell_changed), w);
+            gtk_grid_attach(GTK_GRID(w->grid_max), w->spin_max[i][j], j + 1, i + 1, 1, 1);
+        }
+    }
+
+    /* ---- 4. Helper Lambda / Rebuilder for Need Grid (READ-ONLY) ---- */
+    while (gtk_widget_get_first_child(w->grid_need)) {
+        gtk_grid_remove_row(GTK_GRID(w->grid_need), 0);
+    }
+    for (int j = 0; j < m; j++) {
+        char r_name[16];
+        snprintf(r_name, sizeof(r_name), "R%d", j);
+        GtkWidget *hdr = gtk_label_new(r_name);
+        gtk_widget_add_css_class(hdr, "matrix-header-res");
+        gtk_grid_attach(GTK_GRID(w->grid_need), hdr, j + 1, 0, 1, 1);
+    }
+    for (int i = 0; i < n; i++) {
+        char p_name[16];
+        snprintf(p_name, sizeof(p_name), "P%d", i);
+        GtkWidget *hdr = gtk_label_new(p_name);
+        gtk_widget_add_css_class(hdr, "matrix-header-proc");
+        gtk_grid_attach(GTK_GRID(w->grid_need), hdr, 0, i + 1, 1, 1);
+
+        for (int j = 0; j < m; j++) {
+            int need_val = w->model->draft_state.max[i][j] - w->model->draft_state.alloc[i][j];
+            char n_buf[32];
+            snprintf(n_buf, sizeof(n_buf), "%d", need_val);
+            w->label_need[i][j] = gtk_label_new(n_buf);
+            gtk_widget_add_css_class(w->label_need[i][j], "need-cell");
+            gtk_grid_attach(GTK_GRID(w->grid_need), w->label_need[i][j], j + 1, i + 1, 1, 1);
+        }
+    }
+
+    w->updating_ui = false;
+    update_validation_display(w);
+}
+
+static void on_dimension_spin_changed(GtkSpinButton *spin, gpointer user_data) {
+    (void)spin;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (w->updating_ui) return;
+
+    int n = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w->spin_n));
+    int m = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w->spin_m));
+
+    gui_model_set_draft_dimensions(w->model, n, m);
+    rebuild_matrix_grids(w);
+}
+
+static void on_auto_calc_available(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    gui_model_auto_calculate_draft_available(w->model);
+
+    w->updating_ui = true;
+    for (int j = 0; j < w->model->draft_state.m; j++) {
+        if (w->spin_available[j]) {
+            gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_available[j]),
+                                      w->model->draft_state.available[j]);
+        }
+    }
+    w->updating_ui = false;
+    update_validation_display(w);
+}
+
+static void on_commit_clicked(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (gui_model_commit_draft(w->model)) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "COMMITTED (v%llu)", (unsigned long long)w->model->state_version);
+        gtk_label_set_text(GTK_LABEL(w->badge_status), buf);
+        gtk_widget_remove_css_class(w->badge_status, "badge-rose");
+        gtk_widget_add_css_class(w->badge_status, "badge-emerald");
+    }
+}
+
+static void on_discard_clicked(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    gui_model_init_draft_from_current(w->model);
+    w->updating_ui = true;
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+    w->updating_ui = false;
+    rebuild_matrix_grids(w);
+}
+
+static void on_scenario_file_response(GtkNativeDialog *dialog, int response, gpointer user_data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (response == GTK_RESPONSE_ACCEPT) {
+        GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
+        GFile *file = gtk_file_chooser_get_file(chooser);
+        if (file) {
+            char *path = g_file_get_path(file);
+            if (path) {
+                char err[256] = {0};
+                if (!gui_model_load_scenario(w->model, path, err, sizeof(err))) {
+                    gtk_label_set_text(GTK_LABEL(w->banner_label), err);
+                    gtk_widget_remove_css_class(w->banner_box, "valid-banner");
+                    gtk_widget_add_css_class(w->banner_box, "error-banner");
+                } else {
+                    w->updating_ui = true;
+                    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+                    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+                    w->updating_ui = false;
+                    rebuild_matrix_grids(w);
+                }
+                g_free(path);
+            }
+            g_object_unref(file);
+        }
+    }
+    g_object_unref(dialog);
+}
+
+static void on_open_scenario_dialog(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+
+    GtkFileChooserNative *native = gtk_file_chooser_native_new(
+        "Open ResourceGuard Scenario File",
+        GTK_WINDOW(w->window),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "_Open",
+        "_Cancel"
+    );
+
+    GtkFileFilter *filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "Scenario text files (*.txt)");
+    gtk_file_filter_add_pattern(filter, "*.txt");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(native), filter);
+
+    g_signal_connect(native, "response", G_CALLBACK(on_scenario_file_response), w);
+    gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
+}
+
+static void on_load_preset(GtkWidget *btn, gpointer user_data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    const char *preset_path = (const char *)g_object_get_data(G_OBJECT(btn), "path");
+    if (!preset_path) return;
+
+    char err[256] = {0};
+    if (gui_model_load_scenario(w->model, preset_path, err, sizeof(err))) {
+        w->updating_ui = true;
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+        w->updating_ui = false;
+        rebuild_matrix_grids(w);
+    } else {
+        /* If relative path lookup failed from current directory, try demo baseline */
+        gui_model_init_demo(w->model);
+        w->updating_ui = true;
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+        w->updating_ui = false;
+        rebuild_matrix_grids(w);
+    }
+}
+
+static void on_resources_map(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    gui_model_init_draft_from_current(w->model);
+    w->updating_ui = true;
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+    w->updating_ui = false;
+    rebuild_matrix_grids(w);
+}
+
+GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
+    ResourcesWidgets *w = g_new0(ResourcesWidgets, 1);
+    w->model = model;
+    w->window = window;
+
+    GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, g_free);
+    g_signal_connect(page_box, "map", G_CALLBACK(on_resources_map), w);
 
     /* Header Card */
     GtkWidget *header_card = create_card("System Resources & Allocation Matrices",
-                                         "Inspect and configure Total resources, Available vector, Allocation matrix, and Maximum demand.");
-    GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Conservation Laws Enforced", "badge-emerald"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Max Capacity: 16 Processes x 8 Resources", "badge-muted"));
-    gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
+                                         "Edit system dimensions, Total capacity, Allocation matrix, and Maximum demand. Need is automatically derived.");
+    GtkWidget *hdr_btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
 
-    /* Matrix Overview Card */
-    GtkWidget *matrix_card = create_card("Resource Matrices Architecture",
-                                         "Direct mapping to BankerState internal structures.");
-    GtkWidget *desc = gtk_label_new(
-        "- Total Vector: Global resource capacity bounds.\n"
-        "- Available Vector: Instances currently unallocated (Total - Sum(Alloc)).\n"
-        "- Allocation Matrix: Instances currently assigned to each process.\n"
-        "- Maximum Matrix: Upper bound claim declared by each process.\n"
-        "- Need Matrix: Derived remaining claim (Max - Alloc).");
-    gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_widget_add_css_class(desc, "card-body");
-    gtk_box_append(GTK_BOX(matrix_card), desc);
+    GtkWidget *btn_open = gtk_button_new_with_label("Open Scenario File...");
+    gtk_widget_add_css_class(btn_open, "primary");
+    g_signal_connect(btn_open, "clicked", G_CALLBACK(on_open_scenario_dialog), w);
+    gtk_box_append(GTK_BOX(hdr_btn_box), btn_open);
 
-    gtk_box_append(GTK_BOX(matrix_card),
-                   create_placeholder_banner("Editable Grid & Matrix Editor", "Milestone 4"));
-    gtk_box_append(GTK_BOX(box), matrix_card);
+    GtkWidget *btn_p1 = gtk_button_new_with_label("Preset: demo.txt (Safe)");
+    g_object_set_data(G_OBJECT(btn_p1), "path", (gpointer)"tests/scenarios/demo.txt");
+    g_signal_connect(btn_p1, "clicked", G_CALLBACK(on_load_preset), w);
+    gtk_box_append(GTK_BOX(hdr_btn_box), btn_p1);
 
-    return wrap_in_scrolled_window(box);
+    GtkWidget *btn_p2 = gtk_button_new_with_label("Preset: unsafe.txt");
+    g_object_set_data(G_OBJECT(btn_p2), "path", (gpointer)"tests/scenarios/unsafe.txt");
+    g_signal_connect(btn_p2, "clicked", G_CALLBACK(on_load_preset), w);
+    gtk_box_append(GTK_BOX(hdr_btn_box), btn_p2);
+
+    GtkWidget *btn_rst = gtk_button_new_with_label("Reset to Baseline");
+    g_signal_connect(btn_rst, "clicked", G_CALLBACK(on_discard_clicked), w);
+    gtk_box_append(GTK_BOX(hdr_btn_box), btn_rst);
+
+    w->badge_status = create_badge("COMMITTED (v1)", "badge-emerald");
+    gtk_box_append(GTK_BOX(hdr_btn_box), w->badge_status);
+
+    gtk_box_append(GTK_BOX(header_card), hdr_btn_box);
+    gtk_box_append(GTK_BOX(page_box), header_card);
+
+    /* Dimensions & Global Vectors Card */
+    GtkWidget *dim_card = create_card("System Dimensions & Global Capacity Vectors",
+                                      "Configure number of processes (1-16), resource types (1-8), Total capacity, and Available unallocated instances.");
+
+    GtkWidget *dim_controls_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 20);
+
+    GtkWidget *box_n = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *lbl_n = gtk_label_new("Processes (n):");
+    w->spin_n = gtk_spin_button_new_with_range(1, BANKER_MAX_PROCS, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), model->draft_state.n);
+    g_signal_connect(w->spin_n, "value-changed", G_CALLBACK(on_dimension_spin_changed), w);
+    gtk_box_append(GTK_BOX(box_n), lbl_n);
+    gtk_box_append(GTK_BOX(box_n), w->spin_n);
+    gtk_box_append(GTK_BOX(dim_controls_box), box_n);
+
+    GtkWidget *box_m = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *lbl_m = gtk_label_new("Resource Types (m):");
+    w->spin_m = gtk_spin_button_new_with_range(1, BANKER_MAX_RES, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), model->draft_state.m);
+    g_signal_connect(w->spin_m, "value-changed", G_CALLBACK(on_dimension_spin_changed), w);
+    gtk_box_append(GTK_BOX(box_m), lbl_m);
+    gtk_box_append(GTK_BOX(box_m), w->spin_m);
+    gtk_box_append(GTK_BOX(dim_controls_box), box_m);
+
+    GtkWidget *btn_auto_avail = gtk_button_new_with_label("Auto-Calculate Available from Conservation");
+    g_signal_connect(btn_auto_avail, "clicked", G_CALLBACK(on_auto_calc_available), w);
+    gtk_box_append(GTK_BOX(dim_controls_box), btn_auto_avail);
+
+    gtk_box_append(GTK_BOX(dim_card), dim_controls_box);
+
+    w->grid_vectors = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(w->grid_vectors), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(w->grid_vectors), 8);
+    gtk_box_append(GTK_BOX(dim_card), w->grid_vectors);
+
+    gtk_box_append(GTK_BOX(page_box), dim_card);
+
+    /* Allocation Matrix Card */
+    GtkWidget *alloc_card = create_card("Allocation Matrix (Alloc[i][j])",
+                                        "Instances of each resource currently allocated to each process.");
+    w->grid_alloc = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(w->grid_alloc), 6);
+    gtk_grid_set_column_spacing(GTK_GRID(w->grid_alloc), 6);
+    gtk_box_append(GTK_BOX(alloc_card), w->grid_alloc);
+    gtk_box_append(GTK_BOX(page_box), alloc_card);
+
+    /* Maximum Demand Matrix Card */
+    GtkWidget *max_card = create_card("Maximum Demand Matrix (Max[i][j])",
+                                      "Upper bound on instances each process may declare and request throughout its execution.");
+    w->grid_max = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(w->grid_max), 6);
+    gtk_grid_set_column_spacing(GTK_GRID(w->grid_max), 6);
+    gtk_box_append(GTK_BOX(max_card), w->grid_max);
+    gtk_box_append(GTK_BOX(page_box), max_card);
+
+    /* Need Matrix Card (READ-ONLY) */
+    GtkWidget *need_card = create_card("Derived Need Matrix (Need[i][j] = Max[i][j] - Alloc[i][j]) [READ-ONLY]",
+                                       "Remaining instances each process may request. Automatically recalculated from Max and Alloc; direct editing prohibited.");
+    w->grid_need = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(w->grid_need), 6);
+    gtk_grid_set_column_spacing(GTK_GRID(w->grid_need), 6);
+    gtk_box_append(GTK_BOX(need_card), w->grid_need);
+    gtk_box_append(GTK_BOX(page_box), need_card);
+
+    /* Validation & Commit Banner */
+    GtkWidget *val_card = create_card("Draft State Validation & Commit",
+                                      "Live checks ensure dimension bounds, non-negativity, Alloc <= Max, Max <= Total, and Available + Sum(Alloc) == Total.");
+
+    w->banner_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_add_css_class(w->banner_box, "valid-banner");
+    w->banner_label = gtk_label_new("Configuration is valid.");
+    gtk_label_set_xalign(GTK_LABEL(w->banner_label), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(w->banner_label), TRUE);
+    gtk_box_append(GTK_BOX(w->banner_box), w->banner_label);
+    gtk_box_append(GTK_BOX(val_card), w->banner_box);
+
+    GtkWidget *commit_btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    w->btn_commit = gtk_button_new_with_label("Commit Configuration to Active State");
+    gtk_widget_add_css_class(w->btn_commit, "success");
+    g_signal_connect(w->btn_commit, "clicked", G_CALLBACK(on_commit_clicked), w);
+
+    w->btn_discard = gtk_button_new_with_label("Discard Draft Changes");
+    g_signal_connect(w->btn_discard, "clicked", G_CALLBACK(on_discard_clicked), w);
+
+    gtk_box_append(GTK_BOX(commit_btn_box), w->btn_commit);
+    gtk_box_append(GTK_BOX(commit_btn_box), w->btn_discard);
+    gtk_box_append(GTK_BOX(val_card), commit_btn_box);
+
+    gtk_box_append(GTK_BOX(page_box), val_card);
+
+    /* Initial build */
+    rebuild_matrix_grids(w);
+
+    return wrap_in_scrolled_window(page_box);
 }
 
 /* ------------------------------------------------------------------ */
-/*  3. Safety Analysis Page                                            */
+/*  3. Safety Analysis Page (Placeholder - Milestone 5)                */
 /* ------------------------------------------------------------------ */
 
 GtkWidget *gui_page_safety_create(void) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-
-    GtkWidget *header_card = create_card("Safety Algorithm & Sequence Evaluation",
-                                         "Step-by-step verification of safe sequences and deadlock avoidance.");
-    GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Deterministic Policy: Lowest Index First", "badge-teal"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Trace Step Reconstruction", "badge-muted"));
-    gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
-
-    GtkWidget *details_card = create_card("Algorithm Mechanics & Work Vector",
-                                          "How ResourceGuard computes and traces safety.");
-    GtkWidget *desc = gtk_label_new(
-        "1. Initialize Work = Available and Finish[i] = false for all processes.\n"
-        "2. Find an index i such that Finish[i] == false and Need[i] <= Work.\n"
-        "3. If found, Work += Alloc[i], Finish[i] = true, and record the step in the trace.\n"
-        "4. If all finish, state is SAFE; if stuck, state is UNSAFE.");
-    gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_widget_add_css_class(desc, "card-body");
-    gtk_box_append(GTK_BOX(details_card), desc);
-
-    gtk_box_append(GTK_BOX(details_card),
-                   create_placeholder_banner("Interactive Safe Sequence Visualizer & Trace Inspector", "Milestone 5"));
-    gtk_box_append(GTK_BOX(box), details_card);
-
+    GtkWidget *card = create_card("Safety Algorithm & Trace Engine",
+                                  "Interactive step-by-step replay of Banker's safety verification.");
+    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Safety Sequence Step-Through Visualizer", "Milestone 5"));
+    gtk_box_append(GTK_BOX(box), card);
     return wrap_in_scrolled_window(box);
 }
 
 /* ------------------------------------------------------------------ */
-/*  4. Request Simulator Page                                          */
+/*  4. Request Simulator Page (Placeholder - Milestone 5)              */
 /* ------------------------------------------------------------------ */
 
 GtkWidget *gui_page_simulator_create(void) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-
-    GtkWidget *header_card = create_card("Resource Request Simulator",
-                                         "Simulate hypothetical requests, evaluate safety, and observe atomic commit or rollback.");
-    GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Atomic Check-and-Commit", "badge-emerald"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Instant Rollback on Denial", "badge-teal"));
-    gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
-
-    GtkWidget *body_card = create_card("Request Validation Sequence",
-                                       "Order of checks in banker_request().");
-    GtkWidget *desc = gtk_label_new(
-        "1. Dimension & value validity check (banker_validate).\n"
-        "2. Need constraint: Request <= Need (exceeding need is an error).\n"
-        "3. Availability constraint: Request <= Available (wait if unavailable).\n"
-        "4. Trial allocation: temporarily assign resources and evaluate safety.\n"
-        "5. Commit if safe; rollback without side effects if unsafe.");
-    gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_widget_add_css_class(desc, "card-body");
-    gtk_box_append(GTK_BOX(body_card), desc);
-
-    gtk_box_append(GTK_BOX(body_card),
-                   create_placeholder_banner("Request Input Controls & Outcome Animator", "Milestone 5"));
-    gtk_box_append(GTK_BOX(box), body_card);
-
+    GtkWidget *card = create_card("Request Simulator & Transaction Controls",
+                                  "Simulate interactive process resource requests and atomic trial allocations.");
+    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Interactive Request Dispatcher", "Milestone 5"));
+    gtk_box_append(GTK_BOX(box), card);
     return wrap_in_scrolled_window(box);
 }
 
 /* ------------------------------------------------------------------ */
-/*  5. Why-Not Intelligence Page                                       */
+/*  5. Why-not Intelligence Page (Placeholder - Milestone 6)          */
 /* ------------------------------------------------------------------ */
 
 GtkWidget *gui_page_whynot_create(void) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-
-    GtkWidget *header_card = create_card("Why-Not Intelligence Engine",
-                                         "Signature feature: deep causal explanation of denied requests and safe-region mapping.");
-    GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Exhaustive Candidate Search", "badge-teal"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Manhattan Distance Optimization", "badge-emerald"));
-    gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
-
-    GtkWidget *body_card = create_card("Algorithmic Diagnostics & Space Exploration",
-                                       "Causal analysis beyond standard Banker implementations.");
-    GtkWidget *desc = gtk_label_new(
-        "- Precise Denial Reason: Identifies whether refusal was due to Need excess, unavailability, or safety loss.\n"
-        "- Safe Region Boundary: Evaluates candidates within 0 <= req <= min(Need, Available).\n"
-        "- Componentwise vs Simultaneous Safety: Identifies safe upper bounds per resource.\n"
-        "- Nearest Safe Alternative: Computes closest safe vector to unblock caller.");
-    gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_widget_add_css_class(desc, "card-body");
-    gtk_box_append(GTK_BOX(body_card), desc);
-
-    gtk_box_append(GTK_BOX(body_card),
-                   create_placeholder_banner("2D/3D Safe Region Visualizer & Alternative Recommender", "Milestone 6"));
-    gtk_box_append(GTK_BOX(box), body_card);
-
+    GtkWidget *card = create_card("Why-not Diagnostic Intelligence",
+                                  "Root-cause analysis of rejected requests and safe-region geometry.");
+    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Safe-Region Geometric Map & Manhattan Distance", "Milestone 6"));
+    gtk_box_append(GTK_BOX(box), card);
     return wrap_in_scrolled_window(box);
 }
 
 /* ------------------------------------------------------------------ */
-/*  6. Concurrency Lab Page                                            */
+/*  6. Concurrency Lab Page (Placeholder - Milestone 7)                */
 /* ------------------------------------------------------------------ */
 
 GtkWidget *gui_page_concurrency_create(void) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-
-    GtkWidget *header_card = create_card("Concurrency Lab & POSIX Thread Simulation",
-                                         "Multi-threaded resource allocation simulator with controlled TOCTOU race demonstration.");
-    GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("POSIX Threads (pthreads)", "badge-teal"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Deterministic Barrier Synchronization", "badge-emerald"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Zero C Data Races (TSan Verified)", "badge-muted"));
-    gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
-
-    GtkWidget *body_card = create_card("Simulation Modes & Mechanics",
-                                       "Operating system concurrency principles in practice.");
-    GtkWidget *desc = gtk_label_new(
-        "TSIM_MODE_SAFE:\n"
-        "  Mutex held across entire check-and-commit transaction. Invariants hold 100% of the time.\n\n"
-        "TSIM_MODE_TOCTOU:\n"
-        "  Time-Of-Check to Time-Of-Use race demo. Mutex released between check and commit.\n"
-        "  Shows why atomic locking is necessary even when all memory accesses are locked.");
-    gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_widget_add_css_class(desc, "card-body");
-    gtk_box_append(GTK_BOX(body_card), desc);
-
-    gtk_box_append(GTK_BOX(body_card),
-                   create_placeholder_banner("Live Simulation Dashboard & Worker Thread Controls", "Milestone 7"));
-    gtk_box_append(GTK_BOX(box), body_card);
-
+    GtkWidget *card = create_card("Concurrency Lab: Multithreaded Race Simulation",
+                                  "Demonstrates race-condition vulnerability and atomic mutex protection.");
+    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Live Pthread TOCTOU vs Safe Mode Runner", "Milestone 7"));
+    gtk_box_append(GTK_BOX(box), card);
     return wrap_in_scrolled_window(box);
 }
 
 /* ------------------------------------------------------------------ */
-/*  7. Event History Page                                              */
+/*  7. Event History Page (Placeholder - Milestone 7)                  */
 /* ------------------------------------------------------------------ */
 
 GtkWidget *gui_page_history_create(void) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-
-    GtkWidget *header_card = create_card("Event History & Transaction Log",
-                                         "Chronological log of resource requests, grants, denials, releases, and invariant checks.");
-    GtkWidget *badge_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Monotonic event_id Sequence", "badge-teal"));
-    gtk_box_append(GTK_BOX(badge_box), create_badge("Microsecond Timestamps", "badge-muted"));
-    gtk_box_append(GTK_BOX(header_card), badge_box);
-    gtk_box_append(GTK_BOX(box), header_card);
-
-    GtkWidget *body_card = create_card("Stream Architecture",
-                                       "Thread-safe event streaming to the GTK main context.");
-    GtkWidget *desc = gtk_label_new(
-        "Worker callbacks fire outside internal locks, ensuring high simulation throughput.\n"
-        "Events are copied and dispatched asynchronously to the GLib main context via g_idle_add().\n"
-        "The strictly monotonic event_id ensures deterministic ordering in the UI stream.");
-    gtk_label_set_xalign(GTK_LABEL(desc), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_widget_add_css_class(desc, "card-body");
-    gtk_box_append(GTK_BOX(body_card), desc);
-
-    gtk_box_append(GTK_BOX(body_card),
-                   create_placeholder_banner("Live Event Table & Filter Controls", "Milestone 7"));
-    gtk_box_append(GTK_BOX(box), body_card);
-
+    GtkWidget *card = create_card("Simulation Event Log & Auditing",
+                                  "Ordered event stream with microsecond timestamps and thread IDs.");
+    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Event Log Stream Table", "Milestone 7"));
+    gtk_box_append(GTK_BOX(box), card);
     return wrap_in_scrolled_window(box);
 }

@@ -72,6 +72,11 @@ jobs:
         if: steps.asan_probe.outputs.supported == 'true'
         run: make test_threads_sanitize
 
+      # ---- Application Model & State Controller (C11) ----
+
+      - name: Run Application Model Tests
+        run: make test_model
+
       # ---- GTK4 Desktop Application ----
 
       - name: Build GTK4 Desktop Application
