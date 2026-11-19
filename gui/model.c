@@ -4,7 +4,14 @@
 
 #include "model.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 static void extract_basename(const char *path, char *out, size_t out_len) {
     if (!path || !out || out_len == 0) return;
@@ -18,33 +25,160 @@ static void extract_basename(const char *path, char *out, size_t out_len) {
     snprintf(out, out_len, "%s", start);
 }
 
-static bool resolve_scenario_file(const char *rel_path, char *out, size_t out_len) {
-    if (!rel_path || !out || out_len == 0) return false;
-
-    FILE *f = fopen(rel_path, "r");
+static bool file_exists_readable(const char *path) {
+    if (!path || path[0] == '\0') return false;
+    FILE *f = fopen(path, "r");
     if (f) {
         fclose(f);
+        return true;
+    }
+    return false;
+}
+
+static bool is_absolute_path(const char *path) {
+    if (!path || path[0] == '\0') return false;
+    if (path[0] == '/' || path[0] == '\\') return true;
+#if defined(_WIN32)
+    if (path[0] != '\0' && path[1] == ':') return true;
+#endif
+    return false;
+}
+
+static bool get_executable_directory(char *out, size_t out_len) {
+    if (!out || out_len == 0) return false;
+    char exe_buf[512] = {0};
+
+#if defined(_WIN32)
+    DWORD len = GetModuleFileNameA(NULL, exe_buf, (DWORD)(sizeof(exe_buf) - 1));
+    if (len == 0 || len >= sizeof(exe_buf) - 1) return false;
+#else
+    ssize_t len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (len <= 0 || (size_t)len >= sizeof(exe_buf) - 1) return false;
+    exe_buf[len] = '\0';
+#endif
+
+    char *last_sep = NULL;
+    for (char *p = exe_buf; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            last_sep = p;
+        }
+    }
+    if (!last_sep) return false;
+    *last_sep = '\0';
+    snprintf(out, out_len, "%s", exe_buf);
+    return true;
+}
+
+/* Resource Lookup Order:
+ * 1. Absolute Path: if path is absolute, check readability and return directly.
+ * 2. Environment Overrides: $RESOURCEGUARD_SCENARIOS_DIR, $RESOURCEGUARD_DATA_DIR.
+ * 3. Executable-Relative Path:
+ *    - <exe_dir>/<rel_path>
+ *    - <exe_dir>/../<rel_path> (bin/ or build/ subdirs)
+ *    - <exe_dir>/../../<rel_path>
+ *    - <exe_dir>/../share/resourceguard/<rel_path> (Linux FHS prefix)
+ *    - <exe_dir>/../share/resourceguard/scenarios/<basename>
+ * 4. Current Working Directory Relative: ./<rel_path>, ../<rel_path>, ../../<rel_path>
+ * 5. System Data Directories: /usr/local/share/resourceguard/, /usr/share/resourceguard/
+ * 6. Non-existent: return false without silent substitution. */
+bool gui_model_resolve_resource_path(const char *rel_path, char *out, size_t out_len) {
+    if (!rel_path || !out || out_len == 0) return false;
+
+    /* 1. Absolute path */
+    if (is_absolute_path(rel_path)) {
+        if (file_exists_readable(rel_path)) {
+            snprintf(out, out_len, "%s", rel_path);
+            return true;
+        }
+        return false;
+    }
+
+    char cand[512];
+    char bname[128] = {0};
+    extract_basename(rel_path, bname, sizeof(bname));
+
+    /* 2. Environment variable overrides */
+    const char *env_scen = getenv("RESOURCEGUARD_SCENARIOS_DIR");
+    if (env_scen && env_scen[0] != '\0') {
+        snprintf(cand, sizeof(cand), "%s/%s", env_scen, bname);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+    }
+    const char *env_data = getenv("RESOURCEGUARD_DATA_DIR");
+    if (env_data && env_data[0] != '\0') {
+        snprintf(cand, sizeof(cand), "%s/%s", env_data, rel_path);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+        snprintf(cand, sizeof(cand), "%s/scenarios/%s", env_data, bname);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+    }
+
+    /* 3. Executable-relative paths */
+    char exe_dir[512] = {0};
+    if (get_executable_directory(exe_dir, sizeof(exe_dir))) {
+        snprintf(cand, sizeof(cand), "%s/%s", exe_dir, rel_path);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+        snprintf(cand, sizeof(cand), "%s/../%s", exe_dir, rel_path);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+        snprintf(cand, sizeof(cand), "%s/../../%s", exe_dir, rel_path);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+        snprintf(cand, sizeof(cand), "%s/../share/resourceguard/%s", exe_dir, rel_path);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+        snprintf(cand, sizeof(cand), "%s/../share/resourceguard/scenarios/%s", exe_dir, bname);
+        if (file_exists_readable(cand)) {
+            snprintf(out, out_len, "%s", cand);
+            return true;
+        }
+    }
+
+    /* 4. Current working directory relative */
+    if (file_exists_readable(rel_path)) {
         snprintf(out, out_len, "%s", rel_path);
         return true;
     }
-
-    char candidate[512];
-    snprintf(candidate, sizeof(candidate), "../%s", rel_path);
-    f = fopen(candidate, "r");
-    if (f) {
-        fclose(f);
-        snprintf(out, out_len, "%s", candidate);
+    snprintf(cand, sizeof(cand), "../%s", rel_path);
+    if (file_exists_readable(cand)) {
+        snprintf(out, out_len, "%s", cand);
+        return true;
+    }
+    snprintf(cand, sizeof(cand), "../../%s", rel_path);
+    if (file_exists_readable(cand)) {
+        snprintf(out, out_len, "%s", cand);
         return true;
     }
 
-    snprintf(candidate, sizeof(candidate), "../../%s", rel_path);
-    f = fopen(candidate, "r");
-    if (f) {
-        fclose(f);
-        snprintf(out, out_len, "%s", candidate);
+    /* 5. System standard data directories */
+    snprintf(cand, sizeof(cand), "/usr/local/share/resourceguard/scenarios/%s", bname);
+    if (file_exists_readable(cand)) {
+        snprintf(out, out_len, "%s", cand);
+        return true;
+    }
+    snprintf(cand, sizeof(cand), "/usr/share/resourceguard/scenarios/%s", bname);
+    if (file_exists_readable(cand)) {
+        snprintf(out, out_len, "%s", cand);
         return true;
     }
 
+    /* 6. Not found - do not substitute */
     return false;
 }
 
@@ -74,14 +208,19 @@ void gui_model_load_demo(GuiModel *m) {
     m->state_version++;
 
     char resolved[512] = {0};
-    bool has_file = resolve_scenario_file("tests/scenarios/demo.txt", resolved, sizeof(resolved));
+    bool has_file = gui_model_resolve_resource_path("tests/scenarios/demo.txt", resolved, sizeof(resolved));
 
     BankerState s;
     char parse_err[256] = {0};
     bool loaded_from_file = false;
 
     if (has_file) {
-        loaded_from_file = banker_load_scenario(resolved, &s, parse_err, sizeof(parse_err));
+        if (banker_load_scenario(resolved, &s, parse_err, sizeof(parse_err))) {
+            int bad_p = -1, bad_r = -1;
+            if (banker_validate(&s, &bad_p, &bad_r) == BANKER_OK) {
+                loaded_from_file = true;
+            }
+        }
     }
 
     if (!loaded_from_file) {
@@ -146,7 +285,7 @@ bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_
     }
 
     char actual_path[512];
-    if (!resolve_scenario_file(path, actual_path, sizeof(actual_path))) {
+    if (!gui_model_resolve_resource_path(path, actual_path, sizeof(actual_path))) {
         snprintf(actual_path, sizeof(actual_path), "%s", path);
     }
 

@@ -1,47 +1,83 @@
 /* ResourceGuard GTK4 Professional Dark Theme */
 
 /* Base Window and Surface */
+window,
 window.background {
     background-color: #0f141c;
     color: #e2e8f0;
+    --headerbar-bg-color: #0b111a;
+    --headerbar-fg-color: #f8fafc;
+    --headerbar-border-color: #1e293b;
+    --headerbar-backdrop-color: #0b111a;
+    --headerbar-shade-color: rgba(0, 0, 0, 0.4);
 }
 
+headerbar,
+headerbar.titlebar,
 window headerbar,
-window headerbar.titlebar,
 window.background headerbar,
-headerbar {
-    background-color: #0b111a;
-    background-image: none;
-    box-shadow: none;
-    border-bottom: 1px solid #1e293b;
-    color: #f8fafc;
+.main-headerbar,
+headerbar.main-headerbar {
+    background: #0b111a !important;
+    background-color: #0b111a !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    border-bottom: 1px solid #1e293b !important;
+    color: #f8fafc !important;
     min-height: 52px;
     padding: 0 16px;
 }
 
+headerbar:backdrop,
+headerbar.titlebar:backdrop,
 window headerbar:backdrop,
-window headerbar.titlebar:backdrop,
 window.background headerbar:backdrop,
-headerbar:backdrop {
-    background-color: #0b111a;
-    background-image: none;
-    box-shadow: none;
-    color: #cbd5e1;
+.main-headerbar:backdrop,
+headerbar.main-headerbar:backdrop {
+    background: #0b111a !important;
+    background-color: #0b111a !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    border-bottom: 1px solid #1e293b !important;
+    color: #cbd5e1 !important;
 }
 
-window headerbar .title,
-headerbar .title {
+headerbar windowhandle,
+.main-headerbar windowhandle {
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+}
+
+headerbar .header-title,
+headerbar .title,
+.main-headerbar .title {
     font-weight: 700;
     font-size: 16px;
-    color: #ffffff;
+    color: #ffffff !important;
     letter-spacing: 0.3px;
 }
 
-window headerbar .subtitle,
-headerbar .subtitle {
+headerbar .header-subtitle,
+headerbar .subtitle,
+.main-headerbar .subtitle {
     font-size: 12px;
     font-weight: 600;
-    color: #38bdf8;
+    color: #38bdf8 !important;
+}
+
+headerbar windowcontrols button {
+    color: #cbd5e1 !important;
+}
+
+headerbar windowcontrols button:hover {
+    color: #ffffff !important;
+    background-color: #1e293b !important;
+}
+
+headerbar windowcontrols button.close:hover {
+    color: #ffffff !important;
+    background-color: #ef4444 !important;
 }
 
 /* Sidebar navigation */

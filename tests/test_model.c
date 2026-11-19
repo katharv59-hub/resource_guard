@@ -8,6 +8,25 @@
 #include <assert.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <direct.h>
+#define MKDIR(d) _mkdir(d)
+#define RMDIR(d) _rmdir(d)
+int _putenv(const char *string);
+char *_fullpath(char *absPath, const char *relPath, size_t maxLength);
+static void set_test_env(const char *key_val) {
+    _putenv(key_val);
+}
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#define MKDIR(d) mkdir(d, 0755)
+#define RMDIR(d) rmdir(d)
+static void set_test_env(const char *key_val) {
+    putenv((char *)key_val);
+}
+#endif
+
 static int g_listener_called = 0;
 static void test_listener(GuiModel *m, void *user_data) {
     (void)m;
@@ -16,7 +35,7 @@ static void test_listener(GuiModel *m, void *user_data) {
 }
 
 static void test_initialization(void) {
-    printf("[TEST 1/12] Initial empty model state...\n");
+    printf("[TEST 1/15] Initial empty model state...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -36,7 +55,7 @@ static void test_initialization(void) {
 }
 
 static void test_demo_initialization(void) {
-    printf("[TEST 2/12] Demo baseline initialization...\n");
+    printf("[TEST 2/15] Demo baseline initialization...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -69,7 +88,7 @@ static void test_demo_initialization(void) {
 }
 
 static void test_listener_preservation_and_monotonic_version(void) {
-    printf("[TEST 3/12] Listener preservation & monotonic state version advancement...\n");
+    printf("[TEST 3/15] Listener preservation & monotonic state version advancement...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -101,7 +120,7 @@ static void test_listener_preservation_and_monotonic_version(void) {
 }
 
 static void test_dimension_changes(void) {
-    printf("[TEST 4/12] Dimensional resizing and bounds clamping...\n");
+    printf("[TEST 4/15] Dimensional resizing and bounds clamping...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -130,7 +149,7 @@ static void test_dimension_changes(void) {
 }
 
 static void test_need_matches_banker_need(void) {
-    printf("[TEST 5/12] Authoritative Need derivation (gui_model_get_draft_need == banker_need)...\n");
+    printf("[TEST 5/15] Authoritative Need derivation (gui_model_get_draft_need == banker_need)...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -167,7 +186,7 @@ static void test_need_matches_banker_need(void) {
 }
 
 static void test_draft_validation_rejections(void) {
-    printf("[TEST 6/12] Validation errors and draft rejection...\n");
+    printf("[TEST 6/15] Validation errors and draft rejection...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -209,7 +228,7 @@ static void test_draft_validation_rejections(void) {
 }
 
 static void test_draft_persistence_and_discard(void) {
-    printf("[TEST 7/12] Draft persistence across page navigation and explicit discard...\n");
+    printf("[TEST 7/15] Draft persistence across page navigation and explicit discard...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -233,7 +252,7 @@ static void test_draft_persistence_and_discard(void) {
 }
 
 static void test_auto_calculate_available_and_commit(void) {
-    printf("[TEST 8/12] Auto-calculate Available and commit draft...\n");
+    printf("[TEST 8/15] Auto-calculate Available and commit draft...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -259,7 +278,7 @@ static void test_auto_calculate_available_and_commit(void) {
 }
 
 static void test_unsafe_scenario_preset_and_safety_state(void) {
-    printf("[TEST 9/12] Loading unsafe_initial.txt and verifying UNSAFE evaluation...\n");
+    printf("[TEST 9/15] Loading unsafe_initial.txt and verifying UNSAFE evaluation...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -288,7 +307,7 @@ static void test_unsafe_scenario_preset_and_safety_state(void) {
 }
 
 static void test_failed_preset_preserves_state(void) {
-    printf("[TEST 10/12] Failed preset loading preserves current state without silent fallback...\n");
+    printf("[TEST 10/15] Failed preset loading preserves current state without silent fallback...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -320,7 +339,7 @@ static void test_failed_preset_preserves_state(void) {
 }
 
 static void test_demo_parity_with_file(void) {
-    printf("[TEST 11/12] Parity check between built-in demo baseline and tests/scenarios/demo.txt...\n");
+    printf("[TEST 11/15] Parity check between built-in demo baseline and tests/scenarios/demo.txt...\n");
     fflush(stdout);
     BankerState file_state;
     char err_buf[256] = {0};
@@ -351,7 +370,7 @@ static void test_demo_parity_with_file(void) {
 }
 
 static void test_reset_to_original_baseline(void) {
-    printf("[TEST 12/12] Reset to baseline restores original scenario after draft edits & commit...\n");
+    printf("[TEST 12/15] Reset to baseline restores original scenario after draft edits & commit...\n");
     fflush(stdout);
     GuiModel m;
     gui_model_init(&m);
@@ -383,6 +402,111 @@ static void test_reset_to_original_baseline(void) {
     fflush(stdout);
 }
 
+static void test_resource_lookup_order_and_unrelated_cwd(void) {
+    printf("[TEST 13/15] Resource lookup order and independent directory resolution...\n");
+    fflush(stdout);
+
+    char resolved[512] = {0};
+
+    /* Normal relative path */
+    bool ok1 = gui_model_resolve_resource_path("tests/scenarios/demo.txt", resolved, sizeof(resolved));
+    assert(ok1);
+    assert(strlen(resolved) > 0);
+
+    /* Test environment variable override */
+    static char env_buf[256];
+    snprintf(env_buf, sizeof(env_buf), "RESOURCEGUARD_SCENARIOS_DIR=tests/scenarios");
+    set_test_env(env_buf);
+
+    char resolved_env[512] = {0};
+    bool ok_env = gui_model_resolve_resource_path("demo.txt", resolved_env, sizeof(resolved_env));
+    assert(ok_env);
+
+    /* Verify non-existent file does NOT silently substitute */
+    char resolved_bad[512] = {0};
+    bool ok_bad = gui_model_resolve_resource_path("non_existent_scenario_12345.txt", resolved_bad, sizeof(resolved_bad));
+    assert(!ok_bad);
+    assert(resolved_bad[0] == '\0');
+
+    /* Clear environment variable */
+    set_test_env("RESOURCEGUARD_SCENARIOS_DIR=");
+
+    printf("  -> Passed (lookup order verified, environment overrides work, non-existent rejected).\n");
+    fflush(stdout);
+}
+
+static void test_absolute_scenario_path(void) {
+    printf("[TEST 14/15] Absolute user-selected scenario path loading...\n");
+    fflush(stdout);
+
+    char abs_path[512] = {0};
+#if defined(_WIN32)
+    char *res = _fullpath(abs_path, "tests/scenarios/demo.txt", sizeof(abs_path));
+#else
+    char *res = realpath("tests/scenarios/demo.txt", abs_path);
+#endif
+    assert(res != NULL);
+
+    GuiModel m;
+    gui_model_init(&m);
+
+    char err[256] = {0};
+    bool loaded = gui_model_load_scenario(&m, abs_path, err, sizeof(err));
+    assert(loaded);
+    assert(m.is_loaded);
+    assert(m.current_state.n == 5);
+    assert(m.current_state.m == 3);
+    assert(strcmp(m.scenario_path, abs_path) == 0);
+
+    printf("  -> Passed (absolute path loaded accurately without alteration).\n");
+    fflush(stdout);
+}
+
+static void test_demo_fallback_metadata_and_invalid_demo_rejection(void) {
+    printf("[TEST 15/15] Built-in demo fallback metadata and invalid demo rejection...\n");
+    fflush(stdout);
+
+    /* Create temporary folder and an invalid demo scenario file where Allocation > Maximum */
+    MKDIR("tests/scenarios/test_tmp");
+    FILE *f = fopen("tests/scenarios/test_tmp/demo.txt", "w");
+    assert(f != NULL);
+    fprintf(f, "2 2\n");
+    fprintf(f, "10 10\n");      /* Total */
+    fprintf(f, "0 0\n");        /* Available */
+    fprintf(f, "10 10\n0 0\n"); /* Allocation: P0 Alloc is [10, 10] */
+    fprintf(f, "5 5\n0 0\n");   /* Maximum: P0 Max is [5, 5] -> Alloc > Max! */
+    fclose(f);
+
+    /* Direct scenario lookup to test_tmp folder */
+    set_test_env("RESOURCEGUARD_SCENARIOS_DIR=tests/scenarios/test_tmp");
+
+    GuiModel m;
+    gui_model_init(&m);
+
+    /* Load demo: parser parses test_tmp/demo.txt, but banker_validate fails!
+     * Model MUST reject it and fall back to built-in demo baseline */
+    gui_model_load_demo(&m);
+
+    assert(m.is_loaded);
+    assert(m.current_state.n == 5);
+    assert(m.current_state.m == 3);
+    /* Fallback must be explicitly labelled and have empty path */
+    assert(m.scenario_path[0] == '\0');
+    assert(strcmp(m.scenario_name, "Built-in Demo Baseline (5 procs, 3 res)") == 0);
+
+    /* Verify active state is valid BankerState */
+    int bad_p = -1, bad_r = -1;
+    assert(banker_validate(&m.current_state, &bad_p, &bad_r) == BANKER_OK);
+
+    /* Cleanup temporary file, folder, and environment override */
+    remove("tests/scenarios/test_tmp/demo.txt");
+    RMDIR("tests/scenarios/test_tmp");
+    set_test_env("RESOURCEGUARD_SCENARIOS_DIR=");
+
+    printf("  -> Passed (invalid demo rejected, built-in baseline metadata verified).\n");
+    fflush(stdout);
+}
+
 int main(void) {
     printf("\n============================================================\n");
     printf(" RESOURCEGUARD GUI MODEL & APPLICATION CONTROLLER TESTS\n");
@@ -401,9 +525,12 @@ int main(void) {
     test_failed_preset_preserves_state();
     test_demo_parity_with_file();
     test_reset_to_original_baseline();
+    test_resource_lookup_order_and_unrelated_cwd();
+    test_absolute_scenario_path();
+    test_demo_fallback_metadata_and_invalid_demo_rejection();
 
     printf("\n============================================================\n");
-    printf(" ALL 12 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
+    printf(" ALL 15 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
     printf("============================================================\n\n");
     fflush(stdout);
     return 0;

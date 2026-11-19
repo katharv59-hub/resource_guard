@@ -64,7 +64,8 @@ void gui_model_load_demo(GuiModel *m);
 void gui_model_init_demo(GuiModel *m);
 void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data);
 
-/* Scenario management */
+/* Scenario management & path resolution */
+bool gui_model_resolve_resource_path(const char *rel_path, char *out, size_t out_len);
 bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_t err_len);
 bool gui_model_reset_to_original(GuiModel *m);
 

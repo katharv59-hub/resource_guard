@@ -18,13 +18,16 @@ GtkWidget *gui_window_new(GtkApplication *app) {
 
     /* ---- HeaderBar ---- */
     GtkWidget *header = gtk_header_bar_new();
+    gtk_widget_add_css_class(header, "main-headerbar");
     gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(header), TRUE);
 
     GtkWidget *title_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     GtkWidget *t = gtk_label_new("ResourceGuard");
     gtk_widget_add_css_class(t, "title");
+    gtk_widget_add_css_class(t, "header-title");
     GtkWidget *sub = gtk_label_new("Processor Architecture & Operating Systems");
     gtk_widget_add_css_class(sub, "subtitle");
+    gtk_widget_add_css_class(sub, "header-subtitle");
     gtk_box_append(GTK_BOX(title_box), t);
     gtk_box_append(GTK_BOX(title_box), sub);
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header), title_box);

@@ -147,7 +147,24 @@ jobs:
               print(f'FAILURE: {target} lacks visual structure ({n_colors} unique colors).')
               sys.exit(1)
 
-          print(f'VALIDATION SUCCESS: {target} contains authentic rendered GUI content ({n_colors} colors, {size} bytes).')
+          # ---- HeaderBar Background Luminance Audit ----
+          # Crop a background-only sample area away from text, badge, and window controls:
+          hb_crop = img.crop((150, 15, 300, 40))
+          rgb_img = hb_crop.convert('RGB')
+          luminances = [
+              0.2126 * r + 0.7152 * g + 0.0722 * b
+              for (r, g, b) in rgb_img.getdata()
+          ]
+          luminances.sort()
+          median_lum = luminances[len(luminances) // 2]
+          print(f'HeaderBar Background Median Luminance: {median_lum:.2f} (sampled at x=[150,300], y=[15,40])')
+
+          # Intended dark navy background is #0b111a (lum ~16.4). A light HeaderBar has lum > 150.
+          if median_lum > 70.0:
+              print(f'FAILURE: HeaderBar background is light (median luminance {median_lum:.2f} > 70.0). Expected dark surface (#0b111a).')
+              sys.exit(1)
+
+          print(f'VALIDATION SUCCESS: {target} contains authentic rendered dark GUI content (HeaderBar lum: {median_lum:.2f}, {n_colors} colors, {size} bytes).')
           "
 
       - name: Upload GTK4 Application Screenshot
