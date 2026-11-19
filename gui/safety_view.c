@@ -457,7 +457,7 @@ GtkWidget *gui_page_safety_create(GuiModel *model, GtkWidget *window) {
     /* Bind lifecycle signals and memory cleanup */
     g_signal_connect(page_box, "map", G_CALLBACK(on_safety_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_safety_destroy), w);
-    g_object_set_data_full(G_OBJECT(page_box), "safety_widgets", w, on_safety_free);
+    g_object_set_data(G_OBJECT(page_box), "safety_widgets", w);
 
     /* Register as observer on GuiModel */
     gui_model_add_observer(model, on_safety_model_changed, w);
@@ -589,7 +589,7 @@ GtkWidget *gui_page_safety_create(GuiModel *model, GtkWidget *window) {
 
     /* Initial population */
     safety_refresh(w);
-    g_object_set_data(G_OBJECT(scrolled), "safety_widgets", w);
+    g_object_set_data_full(G_OBJECT(scrolled), "safety_widgets", w, on_safety_free);
 
     return scrolled;
 }

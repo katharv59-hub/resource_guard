@@ -467,6 +467,9 @@ static void simulator_refresh(SimulatorWidgets *w) {
         child = next;
     }
 
+    memset(w->spin_req, 0, sizeof(w->spin_req));
+    memset(w->lbl_res_context, 0, sizeof(w->lbl_res_context));
+
     int m = w->model->current_state.m;
     for (int j = 0; j < m; j++) {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -537,7 +540,7 @@ GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window) {
 
     g_signal_connect(page_box, "map", G_CALLBACK(on_sim_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_sim_destroy), w);
-    g_object_set_data_full(G_OBJECT(page_box), "sim_widgets", w, on_sim_free);
+    g_object_set_data(G_OBJECT(page_box), "sim_widgets", w);
 
     gui_model_add_observer(model, on_sim_model_changed, w);
 
@@ -676,7 +679,7 @@ GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window) {
 
     /* Initial population */
     simulator_refresh(w);
-    g_object_set_data(G_OBJECT(scrolled), "sim_widgets", w);
+    g_object_set_data_full(G_OBJECT(scrolled), "sim_widgets", w, on_sim_free);
 
     return scrolled;
 }

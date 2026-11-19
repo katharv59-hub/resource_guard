@@ -78,26 +78,10 @@ static GtkWidget *wrap_in_scrolled_window(GtkWidget *content_box) {
 /*  1. Dashboard Page (Live Telemetry & Safety State)                  */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    GuiModel  *model;
-    GtkWidget *window;
-
-    GtkWidget *empty_box;
-    GtkWidget *content_box;
-
-    /* Header Badges */
-    GtkWidget *badge_safety;
-    GtkWidget *badge_version;
-    GtkWidget *badge_dim;
-
-    /* Telemetry Labels */
-    GtkWidget *label_source;
-    GtkWidget *label_safety_title;
-    GtkWidget *label_safety_seq;
-    GtkWidget *label_safety_desc;
-    GtkWidget *label_total_vec;
-    GtkWidget *label_avail_vec;
-} DashboardWidgets;
+DashboardWidgets *gui_dashboard_view_get_widgets(GtkWidget *page_widget) {
+    if (!page_widget) return NULL;
+    return (DashboardWidgets *)g_object_get_data(G_OBJECT(page_widget), "dashboard_widgets");
+}
 
 static void dashboard_refresh(DashboardWidgets *w) {
     if (!w || !w->model) return;
@@ -249,7 +233,7 @@ GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window) {
     w->window = window;
 
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, on_dashboard_free);
+    g_object_set_data(G_OBJECT(page_box), "widgets", w);
     g_signal_connect(page_box, "map", G_CALLBACK(on_dashboard_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_dashboard_destroy), w);
 
@@ -362,48 +346,19 @@ GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window) {
     gui_model_add_observer(model, on_dashboard_model_changed, w);
     dashboard_refresh(w);
 
-    return wrap_in_scrolled_window(page_box);
+    GtkWidget *scrolled = wrap_in_scrolled_window(page_box);
+    g_object_set_data_full(G_OBJECT(scrolled), "dashboard_widgets", w, on_dashboard_free);
+    return scrolled;
 }
 
 /* ------------------------------------------------------------------ */
 /*  2. System Resources Page (Matrix Editor & Validation)              */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    GuiModel  *model;
-    GtkWidget *window;
-
-    /* Dimension Controls */
-    GtkWidget *spin_n;
-    GtkWidget *spin_m;
-
-    /* Vectors Grid */
-    GtkWidget *box_vectors;
-    GtkWidget *grid_vectors;
-    GtkWidget *spin_total[BANKER_MAX_RES];
-    GtkWidget *spin_available[BANKER_MAX_RES];
-
-    /* Allocation Matrix */
-    GtkWidget *grid_alloc;
-    GtkWidget *spin_alloc[BANKER_MAX_PROCS][BANKER_MAX_RES];
-
-    /* Maximum Matrix */
-    GtkWidget *grid_max;
-    GtkWidget *spin_max[BANKER_MAX_PROCS][BANKER_MAX_RES];
-
-    /* Need Matrix (Read-Only) */
-    GtkWidget *grid_need;
-    GtkWidget *label_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
-
-    /* Validation & Commit */
-    GtkWidget *banner_box;
-    GtkWidget *banner_label;
-    GtkWidget *badge_status;
-    GtkWidget *btn_commit;
-    GtkWidget *btn_discard;
-
-    bool updating_ui;
-} ResourcesWidgets;
+ResourcesWidgets *gui_resources_view_get_widgets(GtkWidget *page_widget) {
+    if (!page_widget) return NULL;
+    return (ResourcesWidgets *)g_object_get_data(G_OBJECT(page_widget), "resources_widgets");
+}
 
 static void update_validation_display(ResourcesWidgets *w) {
     if (!w || !w->model) return;
@@ -805,7 +760,7 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     w->window = window;
 
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, on_resources_free);
+    g_object_set_data(G_OBJECT(page_box), "widgets", w);
     g_signal_connect(page_box, "map", G_CALLBACK(on_resources_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_resources_destroy), w);
     gui_model_add_observer(model, on_resources_model_changed, w);
@@ -937,7 +892,9 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     /* Initial build */
     rebuild_matrix_grids(w);
 
-    return wrap_in_scrolled_window(page_box);
+    GtkWidget *scrolled = wrap_in_scrolled_window(page_box);
+    g_object_set_data_full(G_OBJECT(scrolled), "resources_widgets", w, on_resources_free);
+    return scrolled;
 }
 
 /* ------------------------------------------------------------------ */

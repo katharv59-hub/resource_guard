@@ -5,6 +5,7 @@
 #include "smoke.h"
 #include "app.h"
 #include "window.h"
+#include "pages.h"
 #include "style.h"
 #include "model.h"
 #include "safety_view.h"
@@ -12,6 +13,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void count_test_obs(GuiModel *m, void *user_data) {
+    (void)m;
+    int *c = (int *)user_data;
+    if (c) (*c)++;
+}
 
 static void process_pending_events(void) {
     while (g_main_context_pending(NULL)) {
@@ -431,9 +438,40 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* 4. Verify Dashboard refreshed after granted request */
+    /* 4. Verify Dashboard refreshed after granted request with actual label assertions */
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "dashboard");
     process_pending_events();
+
+    GtkWidget *dash_page = gtk_stack_get_child_by_name(GTK_STACK(stack), "dashboard");
+    if (!dash_page) {
+        fprintf(stderr, "FAIL: Dashboard page child missing from stack.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    DashboardWidgets *dw = gui_dashboard_view_get_widgets(dash_page);
+    if (!dw) {
+        fprintf(stderr, "FAIL: DashboardWidgets handle not retrieved from dashboard page.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    const char *ver_text = gtk_label_get_text(GTK_LABEL(dw->badge_version));
+    if (!strstr(ver_text, "v2")) {
+        fprintf(stderr, "FAIL: Dashboard version badge did not display updated version v2 (got '%s').\n", ver_text);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    const char *avail_text = gtk_label_get_text(GTK_LABEL(dw->label_avail_vec));
+    if (!strstr(avail_text, "R0: 2") || !strstr(avail_text, "R1: 3") || !strstr(avail_text, "R2: 0")) {
+        fprintf(stderr, "FAIL: Dashboard available label did not display updated vector [2, 3, 0] (got '%s').\n", avail_text);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
 
     /* Return to simulator */
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "simulator");
@@ -495,7 +533,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* 7. Denied Unsafe with rollback info: reset to baseline, P4 asks [3, 3, 0] */
+    /* 7. Denied Unsafe with atomic GUI rollback verification: reset to baseline, P4 asks [3, 3, 0] */
     gui_model_load_demo(model);
     process_pending_events();
     gtk_drop_down_set_selected(GTK_DROP_DOWN(rw->dropdown_proc), 4);
@@ -505,12 +543,35 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[1]), 3);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[2]), 0);
 
+    BankerState state_before_unsafe = model->current_state;
+    BankerState orig_before_unsafe = model->original_state;
+    uint64_t v_before_unsafe = model->state_version;
+
     g_signal_emit_by_name(rw->btn_submit, "clicked");
     process_pending_events();
 
     const char *badge_unsafe = gtk_label_get_text(GTK_LABEL(rw->badge_result_code));
     if (strcmp(badge_unsafe, "REQ_DENIED_UNSAFE") != 0) {
         fprintf(stderr, "FAIL: Expected 'REQ_DENIED_UNSAFE' badge, got '%s'.\n", badge_unsafe);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (memcmp(&model->current_state, &state_before_unsafe, sizeof(BankerState)) != 0) {
+        fprintf(stderr, "FAIL: Committed BankerState was modified despite REQ_DENIED_UNSAFE rollback requirement!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (model->state_version != v_before_unsafe) {
+        fprintf(stderr, "FAIL: state_version advanced unexpectedly on REQ_DENIED_UNSAFE (%lu != %lu)!\n",
+                (unsigned long)model->state_version, (unsigned long)v_before_unsafe);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (memcmp(&model->original_state, &orig_before_unsafe, sizeof(BankerState)) != 0) {
+        fprintf(stderr, "FAIL: Original scenario baseline was modified on REQ_DENIED_UNSAFE!\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
@@ -548,6 +609,197 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     gui_model_init_draft_from_current(model);
     process_pending_events();
 
+    /* 9. Dynamic dimensions: change resource dimension through System Resources */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "resources");
+    process_pending_events();
+
+    GtkWidget *res_page = gtk_stack_get_child_by_name(GTK_STACK(stack), "resources");
+    if (!res_page) {
+        fprintf(stderr, "FAIL: Resources page child missing from stack.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    ResourcesWidgets *res_w = gui_resources_view_get_widgets(res_page);
+    if (!res_w) {
+        fprintf(stderr, "FAIL: ResourcesWidgets handle not retrieved from resources page.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Change m from 3 to 2 */
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(res_w->spin_m), 2);
+    process_pending_events();
+    if (model->draft_state.m != 2) {
+        fprintf(stderr, "FAIL: Draft resource dimension was not updated to 2.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Auto-calculate Available and commit draft */
+    gui_model_auto_calculate_available(model);
+    g_signal_emit_by_name(res_w->btn_commit, "clicked");
+    process_pending_events();
+
+    if (model->current_state.m != 2) {
+        fprintf(stderr, "FAIL: Committed resource dimension was not updated to 2.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Navigate to simulator and verify controls reflect m = 2 */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "simulator");
+    process_pending_events();
+
+    /* Verify simulator resource input count matches committed dimension (2) */
+    int sim_input_rows = 0;
+    for (GtkWidget *ch = gtk_widget_get_first_child(rw->box_resource_inputs); ch != NULL; ch = gtk_widget_get_next_sibling(ch)) {
+        sim_input_rows++;
+    }
+    if (sim_input_rows != 2) {
+        fprintf(stderr, "FAIL: Expected 2 simulator input rows for m=2, got %d.\n", sim_input_rows);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify old resource controls are removed */
+    if (rw->spin_req[2] != NULL || rw->lbl_res_context[2] != NULL) {
+        fprintf(stderr, "FAIL: Stale resource controls (R2) not cleared on dimension reduction.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify new controls are initialized correctly */
+    if (!rw->spin_req[0] || !rw->spin_req[1]) {
+        fprintf(stderr, "FAIL: Dynamic spin buttons R0/R1 not initialized correctly.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_spin_button_get_value(GTK_SPIN_BUTTON(rw->spin_req[0])) != 0.0 ||
+        gtk_spin_button_get_value(GTK_SPIN_BUTTON(rw->spin_req[1])) != 0.0) {
+        fprintf(stderr, "FAIL: Spin buttons not initialized to 0.0.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify Need and Available context is refreshed */
+    const char *ctx_r0 = gtk_label_get_text(GTK_LABEL(rw->lbl_res_context[0]));
+    const char *ctx_r1 = gtk_label_get_text(GTK_LABEL(rw->lbl_res_context[1]));
+    if (!strstr(ctx_r0, "Need:") || !strstr(ctx_r0, "Avail:") ||
+        !strstr(ctx_r1, "Need:") || !strstr(ctx_r1, "Avail:")) {
+        fprintf(stderr, "FAIL: Context labels for R0/R1 not refreshed with Need/Avail (R0: '%s', R1: '%s').\n",
+                ctx_r0, ctx_r1);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Restore the original demo configuration after the test */
+    gui_model_load_demo(model);
+    process_pending_events();
+    if (model->current_state.m != 3) {
+        fprintf(stderr, "FAIL: Failed to restore demo baseline dimension (m=%d != 3).\n", model->current_state.m);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* 10. Unsafe zero-request GUI regression */
+    char err_load[256];
+    if (!gui_model_load_scenario(model, "tests/scenarios/unsafe_initial.txt", err_load, sizeof(err_load))) {
+        fprintf(stderr, "FAIL: Failed to load tests/scenarios/unsafe_initial.txt: %s\n", err_load);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    process_pending_events();
+
+    if (gui_model_is_safe(model, NULL, NULL, NULL)) {
+        fprintf(stderr, "FAIL: Loaded unsafe_initial.txt was expected to evaluate as unsafe.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    int test_obs_calls = 0;
+    gui_model_add_observer(model, count_test_obs, &test_obs_calls);
+
+    uint64_t v_unsafe_before = model->state_version;
+    int obs_before = test_obs_calls;
+
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(rw->dropdown_proc), 0);
+    process_pending_events();
+    for (int j = 0; j < model->current_state.m; j++) {
+        if (rw->spin_req[j]) {
+            gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[j]), 0.0);
+        }
+    }
+
+    g_signal_emit_by_name(rw->btn_submit, "clicked");
+    process_pending_events();
+
+    const char *badge_zero_unsafe = gtk_label_get_text(GTK_LABEL(rw->badge_result_code));
+    if (strcmp(badge_zero_unsafe, "REQ_GRANTED (NO-OP)") != 0) {
+        fprintf(stderr, "FAIL: Expected 'REQ_GRANTED (NO-OP)' badge for zero-request on unsafe state, got '%s'.\n", badge_zero_unsafe);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    const char *desc_zero_unsafe = gtk_label_get_text(GTK_LABEL(rw->label_result_desc));
+    if (!strstr(desc_zero_unsafe, "accepted as a no-op") ||
+        (!strstr(desc_zero_unsafe, "Banker's safety evaluation was not required") &&
+         !strstr(desc_zero_unsafe, "no safety evaluation"))) {
+        fprintf(stderr, "FAIL: Description did not state no safety evaluation was performed (got '%s').\n", desc_zero_unsafe);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    const char *title_zero_unsafe = gtk_label_get_text(GTK_LABEL(rw->label_result_title));
+    if (strstr(title_zero_unsafe, "SAFE STATE") || strstr(desc_zero_unsafe, "system is safe")) {
+        fprintf(stderr, "FAIL: GUI erroneously claimed system is safe after zero request on unsafe state.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    if (gui_model_is_safe(model, NULL, NULL, NULL)) {
+        fprintf(stderr, "FAIL: Model falsely evaluated as safe after zero-request on unsafe baseline!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    if (model->state_version != v_unsafe_before) {
+        fprintf(stderr, "FAIL: state_version advanced unexpectedly on zero request (%lu != %lu)!\n",
+                (unsigned long)model->state_version, (unsigned long)v_unsafe_before);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    if (test_obs_calls != obs_before) {
+        fprintf(stderr, "FAIL: Observer notification fired on zero request (%d != %d)!\n",
+                test_obs_calls, obs_before);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    gui_model_remove_observer(model, count_test_obs, &test_obs_calls);
+
+    /* Restore demo baseline */
+    gui_model_load_demo(model);
+    process_pending_events();
+
     printf("  -> OK: Request Simulator process selection, spin controls, no-op, grant, wait, and rollback verified.\n");
 
     /* CHECK 11/12: Cross-Page Synchronization & Navigation State Integrity */
@@ -580,21 +832,83 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
     printf("  -> OK: Cross-page synchronization and trace updates verified.\n");
 
-    /* CHECK 12/12: Clean Teardown, Widget Disposal & Observer Cleanup */
-    printf("[CHECK 12/12] Tearing down window and verifying observer disposal...\n");
-    if (model->observer_count <= 0) {
-        fprintf(stderr, "FAIL: Expected active observers before window teardown, found 0.\n");
+    /* CHECK 12/12: Page Removal, Dynamic Recreation & Observer Disposal */
+    printf("[CHECK 12/12] Testing dynamic page removal, recreation, and observer lifecycle...\n");
+
+    /* Ensure demo baseline is active */
+    gui_model_load_demo(model);
+    process_pending_events();
+
+    if (model->observer_count != 4) {
+        fprintf(stderr, "FAIL: Expected 4 active observers, found %d.\n", model->observer_count);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
     }
 
+    /* 1. Remove Safety Analysis and Request Simulator pages from stack */
+    GtkWidget *cur_safety = gtk_stack_get_child_by_name(GTK_STACK(stack), "safety");
+    GtkWidget *cur_sim = gtk_stack_get_child_by_name(GTK_STACK(stack), "simulator");
+    if (!cur_safety || !cur_sim) {
+        fprintf(stderr, "FAIL: Safety or Simulator page missing from stack.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    gtk_stack_remove(GTK_STACK(stack), cur_safety);
+    gtk_stack_remove(GTK_STACK(stack), cur_sim);
+    process_pending_events();
+
+    /* Assert that their observers are unregistered (count drops from 4 to 2) */
+    if (model->observer_count != 2) {
+        fprintf(stderr, "FAIL: Expected 2 active observers after removing safety & simulator, found %d.\n",
+                model->observer_count);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* 2. Recreate the pages, verify observer registrations restored exactly once */
+    GtkWidget *new_safety = gui_page_safety_create(model, win);
+    GtkWidget *new_sim = gui_page_simulator_create(model, win);
+    gtk_stack_add_titled(GTK_STACK(stack), new_safety, "safety", "Safety Analysis");
+    gtk_stack_add_titled(GTK_STACK(stack), new_sim, "simulator", "Request Simulator");
+    process_pending_events();
+
+    if (model->observer_count != 4) {
+        fprintf(stderr, "FAIL: Expected 4 active observers after page recreation, found %d.\n",
+                model->observer_count);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* 3. Keep GuiModel alive independently while window/pages are destroyed */
+    g_object_steal_data(G_OBJECT(win), "gui-model");
+
     gtk_window_destroy(GTK_WINDOW(win));
     for (int i = 0; i < 20; i++) {
         process_pending_events();
     }
+
+    /* Verify all observers have been disposed and model has no stale callbacks */
+    if (model->observer_count != 0) {
+        fprintf(stderr, "FAIL: Expected 0 active observers after window teardown, found %d.\n",
+                model->observer_count);
+        g_free(model);
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Trigger state change on the independently alive model to verify zero stale callbacks */
+    gui_model_reset_to_original(model);
+
+    /* Free independently managed model */
+    g_free(model);
     g_object_unref(app);
-    printf("  -> OK: Teardown complete with zero leaks or dangling callbacks.\n");
+
+    printf("  -> OK: Dynamic page removal, recreation, and complete observer cleanup verified.\n");
 
     printf("\n============================================================\n");
     printf(" ALL 12 GTK4 INTEGRATION & SMOKE TEST ASSERTIONS PASSED SUCCESSFULLY!\n");
