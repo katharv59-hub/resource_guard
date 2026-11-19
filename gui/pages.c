@@ -134,7 +134,7 @@ static void dashboard_refresh(DashboardWidgets *w) {
     gtk_label_set_text(GTK_LABEL(w->badge_dim), dim_buf);
 
     /* Update Source Info */
-    char src_buf[256];
+    char src_buf[768];
     snprintf(src_buf, sizeof(src_buf), "Scenario: %s  |  Source: %s",
              snap.scenario_name,
              snap.scenario_path[0] ? snap.scenario_path : "[Direct Edit]");

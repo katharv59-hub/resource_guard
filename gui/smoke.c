@@ -464,7 +464,9 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* 6. Wait Unavailable: P1 asks [3, 3, 0] (available is [2, 3, 0]) */
+    /* 6. Wait Unavailable: P4 asks [3, 3, 0] (available is [2, 3, 0]) */
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(rw->dropdown_proc), 4);
+    process_pending_events();
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[0]), 3);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[1]), 3);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[2]), 0);
@@ -480,8 +482,8 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
     const char *desc_wait = gtk_label_get_text(GTK_LABEL(rw->label_result_desc));
-    if (!strstr(desc_wait, "Process P1 must wait until sufficient resources are released")) {
-        fprintf(stderr, "FAIL: Wait unavailable diagnostic does not identify Process P1 (got '%s').\n", desc_wait);
+    if (!strstr(desc_wait, "Process P4 must wait until sufficient resources are released")) {
+        fprintf(stderr, "FAIL: Wait unavailable diagnostic does not identify Process P4 (got '%s').\n", desc_wait);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
