@@ -986,6 +986,171 @@ static void test_uncommitted_draft_blocks_request(void) {
     fflush(stdout);
 }
 
+static int g_legacy_l1_calls = 0;
+static int g_legacy_l2_calls = 0;
+static int g_obs_a_calls = 0;
+static void callback_l1(GuiModel *m, void *ud) { (void)m; (void)ud; g_legacy_l1_calls++; }
+static void callback_l2(GuiModel *m, void *ud) { (void)m; (void)ud; g_legacy_l2_calls++; }
+static void callback_obs_a(GuiModel *m, void *ud) { (void)m; (void)ud; g_obs_a_calls++; }
+
+static void test_legacy_listener_replacement_preserves_observers(void) {
+    printf("[TEST 22/25] Legacy listener replacement preserves independent registered observers...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    g_legacy_l1_calls = 0;
+    g_legacy_l2_calls = 0;
+    g_obs_a_calls = 0;
+
+    /* 1. Register independent observer A */
+    assert(gui_model_add_observer(&m, callback_obs_a, NULL));
+    assert(m.observer_count == 1);
+
+    /* 2. Set legacy listener L1 */
+    gui_model_set_listener(&m, callback_l1, NULL);
+    assert(m.observer_count == 2);
+
+    /* 3. Replace legacy listener with L2: MUST NOT ERASE OBSERVERS! */
+    gui_model_set_listener(&m, callback_l2, NULL);
+    assert(m.observer_count == 2);
+    assert(m.listener == callback_l2);
+
+    /* 4. Trigger state change */
+    gui_model_reset_to_original(&m);
+
+    assert(g_legacy_l1_calls == 0); /* L1 was replaced, never called */
+    assert(g_legacy_l2_calls == 1); /* L2 called */
+    assert(g_obs_a_calls == 1);     /* Observer A preserved and called */
+
+    /* 5. Clear listener by passing NULL */
+    gui_model_set_listener(&m, NULL, NULL);
+    assert(m.observer_count == 1);
+    assert(m.listener == NULL);
+
+    gui_model_reset_to_original(&m);
+    assert(g_legacy_l2_calls == 1); /* L2 not called again */
+    assert(g_obs_a_calls == 2);     /* Observer A still active */
+
+    printf("  -> Passed (legacy listener replacement did not affect independent observers).\n");
+    fflush(stdout);
+}
+
+static int g_rem_a = 0, g_rem_b = 0, g_rem_c = 0;
+static void cb_rem_a(GuiModel *m, void *ud) { (void)m; (void)ud; g_rem_a++; }
+static void cb_rem_b(GuiModel *m, void *ud) { (void)m; (void)ud; g_rem_b++; }
+static void cb_rem_c(GuiModel *m, void *ud) { (void)m; (void)ud; g_rem_c++; }
+
+static void test_observer_removal_independence(void) {
+    printf("[TEST 23/25] Observer removal independence (removing one observer does not remove others)...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    g_rem_a = 0; g_rem_b = 0; g_rem_c = 0;
+
+    assert(gui_model_add_observer(&m, cb_rem_a, NULL));
+    assert(gui_model_add_observer(&m, cb_rem_b, NULL));
+    assert(gui_model_add_observer(&m, cb_rem_c, NULL));
+    assert(m.observer_count == 3);
+
+    /* Remove middle observer B */
+    assert(gui_model_remove_observer(&m, cb_rem_b, NULL));
+    assert(m.observer_count == 2);
+
+    /* Trigger state change */
+    gui_model_reset_to_original(&m);
+
+    assert(g_rem_a == 1);
+    assert(g_rem_b == 0); /* B was removed */
+    assert(g_rem_c == 1); /* C remained registered and executed */
+
+    printf("  -> Passed (removing one observer preserves remaining registered observers).\n");
+    fflush(stdout);
+}
+
+static int g_self_rem_calls = 0;
+static void cb_self_removing(GuiModel *m, void *ud) {
+    (void)ud;
+    g_self_rem_calls++;
+    gui_model_remove_observer(m, cb_self_removing, NULL);
+}
+
+static void test_observer_notification_modification_safety(void) {
+    printf("[TEST 24/25] Observer collection modification during notification safety...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    g_self_rem_calls = 0;
+    g_rem_a = 0;
+
+    /* Add self-removing observer and regular observer */
+    assert(gui_model_add_observer(&m, cb_self_removing, NULL));
+    assert(gui_model_add_observer(&m, cb_rem_a, NULL));
+    assert(m.observer_count == 2);
+
+    /* First notification pass: cb_self_removing unregisters itself during its call */
+    gui_model_reset_to_original(&m);
+    assert(g_self_rem_calls == 1);
+    assert(g_rem_a == 1);
+    assert(m.observer_count == 1);
+
+    /* Second notification pass: only cb_rem_a remains */
+    gui_model_reset_to_original(&m);
+    assert(g_self_rem_calls == 1); /* not called again */
+    assert(g_rem_a == 2);
+
+    printf("  -> Passed (modifications during notification pass handled safely).\n");
+    fflush(stdout);
+}
+
+static int g_zero_unsafe_obs_calls = 0;
+static void cb_zero_unsafe_obs(GuiModel *m, void *ud) { (void)m; (void)ud; g_zero_unsafe_obs_calls++; }
+
+static void test_zero_request_on_unsafe_state_preserves_unsafe(void) {
+    printf("[TEST 25/25] Zero-resource request on unsafe state preserves UNSAFE status, version, and observers...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+
+    char err[256] = {0};
+    bool loaded = gui_model_load_scenario(&m, "tests/scenarios/unsafe_initial.txt", err, sizeof(err));
+    assert(loaded);
+    assert(m.is_loaded);
+
+    /* Verify initial state is unsafe */
+    assert(!gui_model_is_safe(&m, NULL, NULL, NULL));
+    uint64_t v_initial = m.state_version;
+
+    g_zero_unsafe_obs_calls = 0;
+    assert(gui_model_add_observer(&m, cb_zero_unsafe_obs, NULL));
+
+    /* Submit zero request for P0 */
+    int zero[BANKER_MAX_RES] = {0};
+    RequestResult res = gui_model_submit_request(&m, 0, zero, NULL);
+    assert(res == REQ_GRANTED);
+
+    /* State must still be UNSAFE */
+    assert(!gui_model_is_safe(&m, NULL, NULL, NULL));
+
+    /* Version must be completely unchanged */
+    assert(m.state_version == v_initial);
+
+    /* Observers must NOT be notified */
+    assert(g_zero_unsafe_obs_calls == 0);
+
+    printf("  -> Passed (zero request on unsafe state verified as no-op without safety false-positive).\n");
+    fflush(stdout);
+}
+
 int main(void) {
     printf("\n============================================================\n");
     printf(" RESOURCEGUARD GUI MODEL & APPLICATION CONTROLLER TESTS\n");
@@ -1013,9 +1178,13 @@ int main(void) {
     test_request_validation_rejections_and_rollback();
     test_request_observers_and_notifications();
     test_uncommitted_draft_blocks_request();
+    test_legacy_listener_replacement_preserves_observers();
+    test_observer_removal_independence();
+    test_observer_notification_modification_safety();
+    test_zero_request_on_unsafe_state_preserves_unsafe();
 
     printf("\n============================================================\n");
-    printf(" ALL 21 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
+    printf(" ALL 25 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
     printf("============================================================\n\n");
     fflush(stdout);
     return 0;

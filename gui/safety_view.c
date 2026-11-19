@@ -8,64 +8,32 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-    GuiModel  *model;
-    GtkWidget *window;
-
-    /* Cached safety run */
-    bool       has_analysis;
-    bool       is_safe;
-    int        safe_seq[BANKER_MAX_PROCS];
-    int        safe_seq_len;
-    Trace      trace;
-    int        current_step;
-    uint64_t   analyzed_version;
-
-    /* Top-level containers */
-    GtkWidget *empty_box;
-    GtkWidget *content_box;
-
-    /* Header badges */
-    GtkWidget *badge_status;
-    GtkWidget *badge_version;
-    GtkWidget *badge_dim;
-
-    /* Sequence banner */
-    GtkWidget *label_seq;
-
-    /* Stepper navigation widgets */
-    GtkWidget *btn_prev;
-    GtkWidget *btn_next;
-    GtkWidget *btn_restart;
-    GtkWidget *label_step_indicator;
-
-    /* Step details widgets */
-    GtkWidget *card_step_detail;
-    GtkWidget *label_iter_title;
-    GtkWidget *label_work_before;
-    GtkWidget *box_finish_indicators;
-    GtkWidget *label_process_picked;
-    GtkWidget *label_need_eval;
-    GtkWidget *label_alloc_returned;
-    GtkWidget *label_work_after;
-    GtkWidget *box_stuck_diagnostic;
-    GtkWidget *label_stuck_reason;
-
-    /* Complete Trace Table Container */
-    GtkWidget *box_trace_table;
-} SafetyWidgets;
+SafetyWidgets *gui_safety_view_get_widgets(GtkWidget *page_widget) {
+    if (!page_widget) return NULL;
+    return (SafetyWidgets *)g_object_get_data(G_OBJECT(page_widget), "safety_widgets");
+}
 
 /* Helper: format vector as [ v0, v1, ... ] */
 static void format_vector(const int vec[], int m, char *out, size_t out_len) {
     if (!out || out_len == 0) return;
     out[0] = '\0';
-    snprintf(out, out_len, "[ ");
-    for (int j = 0; j < m; j++) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d%s", vec[j], (j + 1 < m ? ", " : " "));
-        strncat(out, buf, out_len - strlen(out) - 1);
+    size_t pos = 0;
+    int written = snprintf(out, out_len, "[ ");
+    if (written > 0 && (size_t)written < out_len) {
+        pos += (size_t)written;
     }
-    strncat(out, "]", out_len - strlen(out) - 1);
+    for (int j = 0; j < m && pos + 1 < out_len; j++) {
+        written = snprintf(out + pos, out_len - pos, "%d%s", vec[j], (j + 1 < m ? ", " : " "));
+        if (written > 0 && pos + (size_t)written < out_len) {
+            pos += (size_t)written;
+        } else {
+            pos = out_len - 1;
+            break;
+        }
+    }
+    if (pos + 2 < out_len) {
+        snprintf(out + pos, out_len - pos, "]");
+    }
 }
 
 static GtkWidget *make_card(const char *title, const char *subtitle) {
@@ -184,13 +152,11 @@ static void safety_render_step(SafetyWidgets *w) {
         gtk_widget_set_visible(w->box_stuck_diagnostic, FALSE);
 
         int p = st->picked;
-        int need[BANKER_MAX_RES];
-        for (int j = 0; j < w->model->current_state.m; j++) {
-            need[j] = w->model->current_state.max[p][j] - w->model->current_state.alloc[p][j];
-        }
+        int all_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+        gui_model_get_current_need(w->model, all_need);
 
         char need_buf[128], alloc_buf[128], after_buf[128];
-        format_vector(need, w->model->current_state.m, need_buf, sizeof(need_buf));
+        format_vector(all_need[p], w->model->current_state.m, need_buf, sizeof(need_buf));
         format_vector(w->model->current_state.alloc[p], w->model->current_state.m, alloc_buf, sizeof(alloc_buf));
 
         int work_after[BANKER_MAX_RES];
@@ -203,15 +169,15 @@ static void safety_render_step(SafetyWidgets *w) {
         snprintf(pick_msg, sizeof(pick_msg), "Selected Process: Process P%d satisfies condition (Need <= Work)", p);
         gtk_label_set_text(GTK_LABEL(w->label_process_picked), pick_msg);
 
-        char need_msg[256];
+        char need_msg[512];
         snprintf(need_msg, sizeof(need_msg), "Remaining Need(P%d): %s <= Work: %s -> TRUE", p, need_buf, work_buf);
         gtk_label_set_text(GTK_LABEL(w->label_need_eval), need_msg);
 
-        char alloc_msg[256];
+        char alloc_msg[512];
         snprintf(alloc_msg, sizeof(alloc_msg), "Allocation Reclaimed: %s returned to system pool upon P%d completion", alloc_buf, p);
         gtk_label_set_text(GTK_LABEL(w->label_alloc_returned), alloc_msg);
 
-        char after_msg[256];
+        char after_msg[512];
         snprintf(after_msg, sizeof(after_msg), "Updated Work (Next Available): %s", after_buf);
         gtk_label_set_text(GTK_LABEL(w->label_work_after), after_msg);
 
@@ -229,20 +195,24 @@ static void safety_render_step(SafetyWidgets *w) {
         gtk_widget_set_visible(w->box_stuck_diagnostic, TRUE);
 
         /* Construct clear explanation of why remaining processes cannot finish */
-        char diag[1024] = "No unfinished process can proceed because every remaining process requires more resources than currently available:\n";
-        for (int p = 0; p < w->model->current_state.n; p++) {
-            if (!st->finish[p]) {
-                int need[BANKER_MAX_RES];
-                char need_str[128];
-                for (int j = 0; j < w->model->current_state.m; j++) {
-                    need[j] = w->model->current_state.max[p][j] - w->model->current_state.alloc[p][j];
-                }
-                format_vector(need, w->model->current_state.m, need_str, sizeof(need_str));
+        char diag[1024];
+        size_t dpos = (size_t)snprintf(diag, sizeof(diag),
+            "No unfinished process can proceed because every remaining process requires more resources than currently available:\n");
+        int all_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+        gui_model_get_current_need(w->model, all_need);
 
-                char line[256];
-                snprintf(line, sizeof(line), "  • Process P%d: Need %s > Available %s\n",
-                         p, need_str, work_buf);
-                strncat(diag, line, sizeof(diag) - strlen(diag) - 1);
+        for (int p = 0; p < w->model->current_state.n && dpos < sizeof(diag) - 1; p++) {
+            if (!st->finish[p]) {
+                char need_str[128];
+                format_vector(all_need[p], w->model->current_state.m, need_str, sizeof(need_str));
+
+                int written = snprintf(diag + dpos, sizeof(diag) - dpos, "  • Process P%d: Need %s > Available %s\n",
+                                       p, need_str, work_buf);
+                if (written > 0 && dpos + (size_t)written < sizeof(diag)) {
+                    dpos += (size_t)written;
+                } else {
+                    break;
+                }
             }
         }
         gtk_label_set_text(GTK_LABEL(w->label_stuck_reason), diag);
@@ -299,12 +269,10 @@ static void safety_render_full_table(SafetyWidgets *w) {
             gtk_label_set_xalign(GTK_LABEL(lbl_p), 0.0f);
             gtk_grid_attach(GTK_GRID(grid), lbl_p, 2, row, 1, 1);
 
-            int need[BANKER_MAX_RES];
-            for (int j = 0; j < w->model->current_state.m; j++) {
-                need[j] = w->model->current_state.max[s->picked][j] - w->model->current_state.alloc[s->picked][j];
-            }
+            int all_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+            gui_model_get_current_need(w->model, all_need);
             char need_str[128];
-            format_vector(need, w->model->current_state.m, need_str, sizeof(need_str));
+            format_vector(all_need[s->picked], w->model->current_state.m, need_str, sizeof(need_str));
             GtkWidget *lbl_need = gtk_label_new(need_str);
             gtk_label_set_xalign(GTK_LABEL(lbl_need), 0.0f);
             gtk_grid_attach(GTK_GRID(grid), lbl_need, 3, row, 1, 1);
@@ -389,13 +357,19 @@ static void safety_refresh(SafetyWidgets *w) {
 
     /* Safe sequence banner */
     if (w->is_safe) {
-        char seq_buf[512] = "Complete Safe Execution Sequence:  < ";
-        for (int i = 0; i < w->safe_seq_len; i++) {
-            char p_buf[32];
-            snprintf(p_buf, sizeof(p_buf), "%sP%d", (i > 0 ? " -> " : ""), w->safe_seq[i]);
-            strncat(seq_buf, p_buf, sizeof(seq_buf) - strlen(seq_buf) - 1);
+        char seq_buf[512];
+        size_t pos = (size_t)snprintf(seq_buf, sizeof(seq_buf), "Complete Safe Execution Sequence:  < ");
+        for (int i = 0; i < w->safe_seq_len && pos < sizeof(seq_buf) - 8; i++) {
+            int written = snprintf(seq_buf + pos, sizeof(seq_buf) - pos, "%sP%d", (i > 0 ? " -> " : ""), w->safe_seq[i]);
+            if (written > 0 && pos + (size_t)written < sizeof(seq_buf)) {
+                pos += (size_t)written;
+            } else {
+                break;
+            }
         }
-        strncat(seq_buf, " >", sizeof(seq_buf) - strlen(seq_buf) - 1);
+        if (pos + 3 < sizeof(seq_buf)) {
+            snprintf(seq_buf + pos, sizeof(seq_buf) - pos, " >");
+        }
         gtk_label_set_text(GTK_LABEL(w->label_seq), seq_buf);
         gtk_widget_remove_css_class(w->label_seq, "status-pill-unsafe");
         gtk_widget_add_css_class(w->label_seq, "status-pill-safe");
@@ -451,14 +425,23 @@ static void on_safety_map(GtkWidget *widget, gpointer user_data) {
     safety_refresh(w);
 }
 
-static void on_safety_destroy(GtkWidget *widget, gpointer user_data) {
-    (void)widget;
-    SafetyWidgets *w = (SafetyWidgets *)user_data;
+static void on_safety_free(gpointer data) {
+    SafetyWidgets *w = (SafetyWidgets *)data;
     if (w) {
         if (w->model) {
             gui_model_remove_observer(w->model, on_safety_model_changed, w);
+            w->model = NULL;
         }
         g_free(w);
+    }
+}
+
+static void on_safety_destroy(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    SafetyWidgets *w = (SafetyWidgets *)user_data;
+    if (w && w->model) {
+        gui_model_remove_observer(w->model, on_safety_model_changed, w);
+        w->model = NULL;
     }
 }
 
@@ -471,9 +454,10 @@ GtkWidget *gui_page_safety_create(GuiModel *model, GtkWidget *window) {
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_widget_add_css_class(page_box, "page-container");
 
-    /* Bind lifecycle signals */
+    /* Bind lifecycle signals and memory cleanup */
     g_signal_connect(page_box, "map", G_CALLBACK(on_safety_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_safety_destroy), w);
+    g_object_set_data_full(G_OBJECT(page_box), "safety_widgets", w, on_safety_free);
 
     /* Register as observer on GuiModel */
     gui_model_add_observer(model, on_safety_model_changed, w);
@@ -605,6 +589,7 @@ GtkWidget *gui_page_safety_create(GuiModel *model, GtkWidget *window) {
 
     /* Initial population */
     safety_refresh(w);
+    g_object_set_data(G_OBJECT(scrolled), "safety_widgets", w);
 
     return scrolled;
 }

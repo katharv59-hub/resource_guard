@@ -8,57 +8,31 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-    GuiModel  *model;
-    GtkWidget *window;
-
-    /* Top-level containers */
-    GtkWidget *empty_box;
-    GtkWidget *content_box;
-
-    /* Header badges */
-    GtkWidget *badge_status;
-    GtkWidget *badge_version;
-    GtkWidget *badge_dim;
-
-    /* Uncommitted draft warning banner */
-    GtkWidget *banner_draft_warning;
-    GtkWidget *label_draft_warning;
-
-    /* Input section */
-    GtkWidget *dropdown_proc;
-    GtkWidget *box_resource_inputs;
-    GtkWidget *spin_req[BANKER_MAX_RES];
-    GtkWidget *lbl_res_context[BANKER_MAX_RES];
-
-    /* Process telemetry context labels */
-    GtkWidget *label_proc_alloc;
-    GtkWidget *label_proc_max;
-    GtkWidget *label_proc_need;
-    GtkWidget *label_sys_avail;
-
-    /* Action buttons */
-    GtkWidget *btn_submit;
-    GtkWidget *btn_clear;
-
-    /* Result presentation card and widgets */
-    GtkWidget *card_result;
-    GtkWidget *badge_result_code;
-    GtkWidget *label_result_title;
-    GtkWidget *label_result_desc;
-    GtkWidget *box_result_details;
-} SimulatorWidgets;
+SimulatorWidgets *gui_request_view_get_widgets(GtkWidget *page_widget) {
+    if (!page_widget) return NULL;
+    return (SimulatorWidgets *)g_object_get_data(G_OBJECT(page_widget), "sim_widgets");
+}
 
 static void format_vec(const int vec[], int m, char *out, size_t out_len) {
     if (!out || out_len == 0) return;
     out[0] = '\0';
-    snprintf(out, out_len, "[ ");
-    for (int j = 0; j < m; j++) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d%s", vec[j], (j + 1 < m ? ", " : " "));
-        strncat(out, buf, out_len - strlen(out) - 1);
+    size_t pos = 0;
+    int written = snprintf(out, out_len, "[ ");
+    if (written > 0 && (size_t)written < out_len) {
+        pos += (size_t)written;
     }
-    strncat(out, "]", out_len - strlen(out) - 1);
+    for (int j = 0; j < m && pos + 1 < out_len; j++) {
+        written = snprintf(out + pos, out_len - pos, "%d%s", vec[j], (j + 1 < m ? ", " : " "));
+        if (written > 0 && pos + (size_t)written < out_len) {
+            pos += (size_t)written;
+        } else {
+            pos = out_len - 1;
+            break;
+        }
+    }
+    if (pos + 2 < out_len) {
+        snprintf(out + pos, out_len - pos, "]");
+    }
 }
 
 static GtkWidget *make_card(const char *title, const char *subtitle) {
@@ -102,15 +76,13 @@ static void update_process_context(SimulatorWidgets *w) {
     int m = w->model->current_state.m;
     if (pid < 0 || pid >= n) pid = 0;
 
-    int need[BANKER_MAX_RES];
-    for (int j = 0; j < m; j++) {
-        need[j] = w->model->current_state.max[pid][j] - w->model->current_state.alloc[pid][j];
-    }
+    int all_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+    gui_model_get_current_need(w->model, all_need);
 
     char alloc_str[128], max_str[128], need_str[128], avail_str[128];
     format_vec(w->model->current_state.alloc[pid], m, alloc_str, sizeof(alloc_str));
     format_vec(w->model->current_state.max[pid], m, max_str, sizeof(max_str));
-    format_vec(need, m, need_str, sizeof(need_str));
+    format_vec(all_need[pid], m, need_str, sizeof(need_str));
     format_vec(w->model->current_state.available, m, avail_str, sizeof(avail_str));
 
     char buf[256];
@@ -172,56 +144,96 @@ static void display_result(SimulatorWidgets *w, RequestResult res, int pid, cons
     format_vec(req, m, req_str, sizeof(req_str));
     format_vec(w->model->current_state.available, m, avail_str, sizeof(avail_str));
 
-    int current_need[BANKER_MAX_RES];
+    int all_need[BANKER_MAX_PROCS][BANKER_MAX_RES];
+    gui_model_get_current_need(w->model, all_need);
+    format_vec(all_need[pid], m, need_str, sizeof(need_str));
+
+    bool is_zero = true;
     for (int j = 0; j < m; j++) {
-        current_need[j] = w->model->current_state.max[pid][j] - w->model->current_state.alloc[pid][j];
+        if (req[j] != 0) { is_zero = false; break; }
     }
-    format_vec(current_need, m, need_str, sizeof(need_str));
 
     switch (res) {
         case REQ_GRANTED: {
-            gtk_label_set_text(GTK_LABEL(w->badge_result_code), "REQ_GRANTED");
+            gtk_label_set_text(GTK_LABEL(w->badge_result_code), is_zero ? "REQ_GRANTED (NO-OP)" : "REQ_GRANTED");
             gtk_widget_remove_css_class(w->badge_result_code, "badge-rose");
             gtk_widget_remove_css_class(w->badge_result_code, "badge-amber");
-            gtk_widget_add_css_class(w->badge_result_code, "badge-emerald");
+            gtk_widget_add_css_class(w->badge_result_code, is_zero ? "badge-teal" : "badge-emerald");
 
-            char title[128];
-            snprintf(title, sizeof(title), "REQUEST GRANTED: Process P%d allocated %s", pid, req_str);
-            gtk_label_set_text(GTK_LABEL(w->label_result_title), title);
-            gtk_label_set_text(GTK_LABEL(w->label_result_desc),
-                               "Transaction committed. Trial state confirmed 100% safe. System resources and model state updated.");
+            char title[256];
+            if (is_zero) {
+                snprintf(title, sizeof(title), "NO-OP REQUEST ACCEPTED: Process P%d requested 0 resources", pid);
+                gtk_label_set_text(GTK_LABEL(w->label_result_title), title);
+                gtk_label_set_text(GTK_LABEL(w->label_result_desc),
+                                   "Request was accepted as a no-op. Zero resources were allocated. "
+                                   "No state change occurred, and no new safety evaluation was performed.");
 
-            char buf[256];
-            snprintf(buf, sizeof(buf), "Committed Available Vector:    %s", avail_str);
-            GtkWidget *l1 = gtk_label_new(buf);
-            gtk_label_set_xalign(GTK_LABEL(l1), 0.0f);
-            gtk_box_append(GTK_BOX(w->box_result_details), l1);
+                char buf[256];
+                snprintf(buf, sizeof(buf), "Unchanged Available Vector:    %s", avail_str);
+                GtkWidget *l1 = gtk_label_new(buf);
+                gtk_label_set_xalign(GTK_LABEL(l1), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), l1);
 
-            char alloc_str[128];
-            format_vec(w->model->current_state.alloc[pid], m, alloc_str, sizeof(alloc_str));
-            snprintf(buf, sizeof(buf), "Updated Allocation of P%d:       %s", pid, alloc_str);
-            GtkWidget *l2 = gtk_label_new(buf);
-            gtk_label_set_xalign(GTK_LABEL(l2), 0.0f);
-            gtk_box_append(GTK_BOX(w->box_result_details), l2);
+                char alloc_str[128];
+                format_vec(w->model->current_state.alloc[pid], m, alloc_str, sizeof(alloc_str));
+                snprintf(buf, sizeof(buf), "Unchanged Allocation of P%d:       %s", pid, alloc_str);
+                GtkWidget *l2 = gtk_label_new(buf);
+                gtk_label_set_xalign(GTK_LABEL(l2), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), l2);
 
-            snprintf(buf, sizeof(buf), "Updated Remaining Need of P%d:   %s", pid, need_str);
-            GtkWidget *l3 = gtk_label_new(buf);
-            gtk_label_set_xalign(GTK_LABEL(l3), 0.0f);
-            gtk_box_append(GTK_BOX(w->box_result_details), l3);
+                snprintf(buf, sizeof(buf), "Unchanged Remaining Need of P%d:   %s", pid, need_str);
+                GtkWidget *l3 = gtk_label_new(buf);
+                gtk_label_set_xalign(GTK_LABEL(l3), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), l3);
 
-            int seq[BANKER_MAX_PROCS], seq_len = 0;
-            if (gui_model_is_safe(w->model, seq, &seq_len, NULL)) {
-                char s_buf[256] = "Resulting Safe Sequence:  < ";
-                for (int i = 0; i < seq_len; i++) {
-                    char p_str[16];
-                    snprintf(p_str, sizeof(p_str), "%sP%d", (i > 0 ? " -> " : ""), seq[i]);
-                    strncat(s_buf, p_str, sizeof(s_buf) - strlen(s_buf) - 1);
+                GtkWidget *lnoop = gtk_label_new("No resources allocated. System state version remains unchanged.");
+                gtk_widget_add_css_class(lnoop, "status-pill-wait");
+                gtk_label_set_xalign(GTK_LABEL(lnoop), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), lnoop);
+            } else {
+                snprintf(title, sizeof(title), "REQUEST GRANTED: Process P%d allocated %s", pid, req_str);
+                gtk_label_set_text(GTK_LABEL(w->label_result_title), title);
+                gtk_label_set_text(GTK_LABEL(w->label_result_desc),
+                                   "Transaction committed. Trial state confirmed 100% safe. System resources and model state updated.");
+
+                char buf[256];
+                snprintf(buf, sizeof(buf), "Committed Available Vector:    %s", avail_str);
+                GtkWidget *l1 = gtk_label_new(buf);
+                gtk_label_set_xalign(GTK_LABEL(l1), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), l1);
+
+                char alloc_str[128];
+                format_vec(w->model->current_state.alloc[pid], m, alloc_str, sizeof(alloc_str));
+                snprintf(buf, sizeof(buf), "Updated Allocation of P%d:       %s", pid, alloc_str);
+                GtkWidget *l2 = gtk_label_new(buf);
+                gtk_label_set_xalign(GTK_LABEL(l2), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), l2);
+
+                snprintf(buf, sizeof(buf), "Updated Remaining Need of P%d:   %s", pid, need_str);
+                GtkWidget *l3 = gtk_label_new(buf);
+                gtk_label_set_xalign(GTK_LABEL(l3), 0.0f);
+                gtk_box_append(GTK_BOX(w->box_result_details), l3);
+
+                int seq[BANKER_MAX_PROCS], seq_len = 0;
+                if (gui_model_is_safe(w->model, seq, &seq_len, NULL)) {
+                    char s_buf[256];
+                    size_t pos = (size_t)snprintf(s_buf, sizeof(s_buf), "Resulting Safe Sequence:  < ");
+                    for (int i = 0; i < seq_len && pos < sizeof(s_buf) - 8; i++) {
+                        int written = snprintf(s_buf + pos, sizeof(s_buf) - pos, "%sP%d", (i > 0 ? " -> " : ""), seq[i]);
+                        if (written > 0 && pos + (size_t)written < sizeof(s_buf)) {
+                            pos += (size_t)written;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (pos + 3 < sizeof(s_buf)) {
+                        snprintf(s_buf + pos, sizeof(s_buf) - pos, " >");
+                    }
+                    GtkWidget *ls = gtk_label_new(s_buf);
+                    gtk_widget_add_css_class(ls, "status-pill-safe");
+                    gtk_label_set_xalign(GTK_LABEL(ls), 0.0f);
+                    gtk_box_append(GTK_BOX(w->box_result_details), ls);
                 }
-                strncat(s_buf, " >", sizeof(s_buf) - strlen(s_buf) - 1);
-                GtkWidget *ls = gtk_label_new(s_buf);
-                gtk_widget_add_css_class(ls, "status-pill-safe");
-                gtk_label_set_xalign(GTK_LABEL(ls), 0.0f);
-                gtk_box_append(GTK_BOX(w->box_result_details), ls);
             }
             break;
         }
@@ -273,10 +285,10 @@ static void display_result(SimulatorWidgets *w, RequestResult res, int pid, cons
             gtk_box_append(GTK_BOX(w->box_result_details), l2);
 
             for (int j = 0; j < m; j++) {
-                if (req[j] > current_need[j]) {
+                if (req[j] > all_need[pid][j]) {
                     char ex[128];
                     snprintf(ex, sizeof(ex), "  • Resource R%d: Requested %d exceeds Remaining Need %d (exceeded by %d)",
-                             j, req[j], current_need[j], req[j] - current_need[j]);
+                             j, req[j], all_need[pid][j], req[j] - all_need[pid][j]);
                     GtkWidget *lex = gtk_label_new(ex);
                     gtk_label_set_xalign(GTK_LABEL(lex), 0.0f);
                     gtk_box_append(GTK_BOX(w->box_result_details), lex);
@@ -292,9 +304,13 @@ static void display_result(SimulatorWidgets *w, RequestResult res, int pid, cons
             gtk_widget_add_css_class(w->badge_result_code, "badge-amber");
 
             gtk_label_set_text(GTK_LABEL(w->label_result_title), "REQUEST WAITING: INSUFFICIENT SYSTEM AVAILABLE");
-            gtk_label_set_text(GTK_LABEL(w->label_result_desc),
-                               "Resources are currently allocated to other processes. Process P"
-                               " must wait until holding processes release resources. Engine safety check was not evaluated.");
+            char desc[512];
+            snprintf(desc, sizeof(desc),
+                     "Process P%d must wait until sufficient resources are released. "
+                     "Resources are currently allocated to other processes. "
+                     "The Banker's safety algorithm was not executed for this outcome.",
+                     pid);
+            gtk_label_set_text(GTK_LABEL(w->label_result_desc), desc);
 
             char buf[256];
             snprintf(buf, sizeof(buf), "Requested Vector:           %s", req_str);
@@ -350,12 +366,11 @@ static void display_result(SimulatorWidgets *w, RequestResult res, int pid, cons
             gtk_box_append(GTK_BOX(w->box_result_details), lrb);
 
             if (trace && trace->count > 0) {
-                char tr_info[256];
-                snprintf(tr_info, sizeof(tr_info), "Safety Run: Halted at Step %d (picked = %d). Stuck iteration work = ",
-                         trace->count, trace->steps[trace->count - 1].picked);
                 char stuck_work[128];
                 format_vec(trace->final_work, m, stuck_work, sizeof(stuck_work));
-                strncat(tr_info, stuck_work, sizeof(tr_info) - strlen(tr_info) - 1);
+                char tr_info[256];
+                snprintf(tr_info, sizeof(tr_info), "Safety Run: Halted at Step %d (picked = %d). Stuck iteration work = %s",
+                         trace->count, trace->steps[trace->count - 1].picked, stuck_work);
 
                 GtkWidget *ltr = gtk_label_new(tr_info);
                 gtk_label_set_xalign(GTK_LABEL(ltr), 0.0f);
@@ -492,14 +507,23 @@ static void on_sim_map(GtkWidget *widget, gpointer user_data) {
     simulator_refresh(w);
 }
 
-static void on_sim_destroy(GtkWidget *widget, gpointer user_data) {
-    (void)widget;
-    SimulatorWidgets *w = (SimulatorWidgets *)user_data;
+static void on_sim_free(gpointer data) {
+    SimulatorWidgets *w = (SimulatorWidgets *)data;
     if (w) {
         if (w->model) {
             gui_model_remove_observer(w->model, on_sim_model_changed, w);
+            w->model = NULL;
         }
         g_free(w);
+    }
+}
+
+static void on_sim_destroy(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    SimulatorWidgets *w = (SimulatorWidgets *)user_data;
+    if (w && w->model) {
+        gui_model_remove_observer(w->model, on_sim_model_changed, w);
+        w->model = NULL;
     }
 }
 
@@ -513,6 +537,7 @@ GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window) {
 
     g_signal_connect(page_box, "map", G_CALLBACK(on_sim_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_sim_destroy), w);
+    g_object_set_data_full(G_OBJECT(page_box), "sim_widgets", w, on_sim_free);
 
     gui_model_add_observer(model, on_sim_model_changed, w);
 
@@ -649,7 +674,9 @@ GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window) {
                                    GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), page_box);
 
+    /* Initial population */
     simulator_refresh(w);
+    g_object_set_data(G_OBJECT(scrolled), "sim_widgets", w);
 
     return scrolled;
 }

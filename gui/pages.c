@@ -143,13 +143,19 @@ static void dashboard_refresh(DashboardWidgets *w) {
     /* Update Safety Section */
     if (snap.is_safe) {
         gtk_label_set_text(GTK_LABEL(w->label_safety_title), "Safe Execution Sequence Verified:");
-        char seq_buf[256] = "< ";
-        for (int i = 0; i < snap.safe_seq_len; i++) {
-            char p_buf[16];
-            snprintf(p_buf, sizeof(p_buf), "%sP%d", (i > 0 ? " -> " : ""), snap.safe_seq[i]);
-            strncat(seq_buf, p_buf, sizeof(seq_buf) - strlen(seq_buf) - 1);
+        char seq_buf[256];
+        size_t pos = (size_t)snprintf(seq_buf, sizeof(seq_buf), "< ");
+        for (int i = 0; i < snap.safe_seq_len && pos < sizeof(seq_buf) - 8; i++) {
+            int written = snprintf(seq_buf + pos, sizeof(seq_buf) - pos, "%sP%d", (i > 0 ? " -> " : ""), snap.safe_seq[i]);
+            if (written > 0 && pos + (size_t)written < sizeof(seq_buf)) {
+                pos += (size_t)written;
+            } else {
+                break;
+            }
         }
-        strncat(seq_buf, " >", sizeof(seq_buf) - strlen(seq_buf) - 1);
+        if (pos + 3 < sizeof(seq_buf)) {
+            snprintf(seq_buf + pos, sizeof(seq_buf) - pos, " >");
+        }
         gtk_label_set_text(GTK_LABEL(w->label_safety_seq), seq_buf);
         gtk_label_set_text(GTK_LABEL(w->label_safety_desc),
                            "All processes can acquire their maximum declared demand and terminate safely without deadlock.");
@@ -161,20 +167,30 @@ static void dashboard_refresh(DashboardWidgets *w) {
     }
 
     /* Update Total Vector */
-    char total_buf[256] = "";
-    for (int j = 0; j < snap.m; j++) {
-        char item[32];
-        snprintf(item, sizeof(item), "R%d: %-3d   ", j, snap.total[j]);
-        strncat(total_buf, item, sizeof(total_buf) - strlen(total_buf) - 1);
+    char total_buf[256];
+    size_t tpos = 0;
+    total_buf[0] = '\0';
+    for (int j = 0; j < snap.m && tpos < sizeof(total_buf) - 1; j++) {
+        int written = snprintf(total_buf + tpos, sizeof(total_buf) - tpos, "R%d: %-3d   ", j, snap.total[j]);
+        if (written > 0 && tpos + (size_t)written < sizeof(total_buf)) {
+            tpos += (size_t)written;
+        } else {
+            break;
+        }
     }
     gtk_label_set_text(GTK_LABEL(w->label_total_vec), total_buf);
 
     /* Update Available Vector */
-    char avail_buf[256] = "";
-    for (int j = 0; j < snap.m; j++) {
-        char item[32];
-        snprintf(item, sizeof(item), "R%d: %-3d   ", j, snap.available[j]);
-        strncat(avail_buf, item, sizeof(avail_buf) - strlen(avail_buf) - 1);
+    char avail_buf[256];
+    size_t apos = 0;
+    avail_buf[0] = '\0';
+    for (int j = 0; j < snap.m && apos < sizeof(avail_buf) - 1; j++) {
+        int written = snprintf(avail_buf + apos, sizeof(avail_buf) - apos, "R%d: %-3d   ", j, snap.available[j]);
+        if (written > 0 && apos + (size_t)written < sizeof(avail_buf)) {
+            apos += (size_t)written;
+        } else {
+            break;
+        }
     }
     gtk_label_set_text(GTK_LABEL(w->label_avail_vec), avail_buf);
 }
@@ -184,11 +200,23 @@ static void on_dashboard_model_changed(GuiModel *model, void *user_data) {
     dashboard_refresh((DashboardWidgets *)user_data);
 }
 
+static void on_dashboard_free(gpointer data) {
+    DashboardWidgets *w = (DashboardWidgets *)data;
+    if (w) {
+        if (w->model) {
+            gui_model_remove_observer(w->model, on_dashboard_model_changed, w);
+            w->model = NULL;
+        }
+        g_free(w);
+    }
+}
+
 static void on_dashboard_destroy(GtkWidget *widget, gpointer user_data) {
     (void)widget;
     DashboardWidgets *w = (DashboardWidgets *)user_data;
     if (w && w->model) {
         gui_model_remove_observer(w->model, on_dashboard_model_changed, w);
+        w->model = NULL;
     }
 }
 
@@ -221,7 +249,7 @@ GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window) {
     w->window = window;
 
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, g_free);
+    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, on_dashboard_free);
     g_signal_connect(page_box, "map", G_CALLBACK(on_dashboard_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_dashboard_destroy), w);
 
@@ -751,11 +779,23 @@ static void on_resources_model_changed(GuiModel *model, void *user_data) {
     rebuild_matrix_grids(w);
 }
 
+static void on_resources_free(gpointer data) {
+    ResourcesWidgets *w = (ResourcesWidgets *)data;
+    if (w) {
+        if (w->model) {
+            gui_model_remove_observer(w->model, on_resources_model_changed, w);
+            w->model = NULL;
+        }
+        g_free(w);
+    }
+}
+
 static void on_resources_destroy(GtkWidget *widget, gpointer user_data) {
     (void)widget;
     ResourcesWidgets *w = (ResourcesWidgets *)user_data;
     if (w && w->model) {
         gui_model_remove_observer(w->model, on_resources_model_changed, w);
+        w->model = NULL;
     }
 }
 
@@ -765,7 +805,7 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     w->window = window;
 
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, g_free);
+    g_object_set_data_full(G_OBJECT(page_box), "widgets", w, on_resources_free);
     g_signal_connect(page_box, "map", G_CALLBACK(on_resources_map), w);
     g_signal_connect(page_box, "destroy", G_CALLBACK(on_resources_destroy), w);
     gui_model_add_observer(model, on_resources_model_changed, w);

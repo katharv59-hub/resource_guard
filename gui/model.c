@@ -188,9 +188,24 @@ bool gui_model_resolve_resource_path(const char *rel_path, char *out, size_t out
 
 static void notify_change(GuiModel *m) {
     if (!m) return;
-    for (int i = 0; i < m->observer_count; i++) {
-        if (m->observers[i].fn) {
-            m->observers[i].fn(m, m->observers[i].user_data);
+    GuiModelObserver snapshot[GUI_MODEL_MAX_OBSERVERS];
+    int count = m->observer_count;
+    if (count > GUI_MODEL_MAX_OBSERVERS) count = GUI_MODEL_MAX_OBSERVERS;
+    memcpy(snapshot, m->observers, (size_t)count * sizeof(GuiModelObserver));
+
+    for (int i = 0; i < count; i++) {
+        if (snapshot[i].fn) {
+            bool still_registered = false;
+            for (int j = 0; j < m->observer_count; j++) {
+                if (m->observers[j].fn == snapshot[i].fn &&
+                    m->observers[j].user_data == snapshot[i].user_data) {
+                    still_registered = true;
+                    break;
+                }
+            }
+            if (still_registered) {
+                snapshot[i].fn(m, snapshot[i].user_data);
+            }
         }
     }
 }
@@ -243,10 +258,11 @@ bool gui_model_remove_observer(GuiModel *m, GuiModelChangeListener cb, void *use
 
 void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
     if (!m) return;
+    if (m->listener) {
+        gui_model_remove_observer(m, m->listener, m->listener_user_data);
+    }
     m->listener = cb;
     m->listener_user_data = user_data;
-    m->observer_count = 0;
-    memset(m->observers, 0, sizeof(m->observers));
     if (cb) {
         gui_model_add_observer(m, cb, user_data);
     }
