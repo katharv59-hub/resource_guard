@@ -674,6 +674,318 @@ static void test_demo_fallback_metadata_and_invalid_demo_rejection(void) {
     fflush(stdout);
 }
 
+static void test_safety_trace_work_finish_vectors(void) {
+    printf("[TEST 16/21] Safety trace: sequence <1,3,0,2,4>, Work evolution, Finish arrays, and Total conservation...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    int seq[BANKER_MAX_PROCS] = {0};
+    int len = 0;
+    Trace tr;
+    memset(&tr, 0, sizeof(tr));
+
+    bool safe = gui_model_is_safe(&m, seq, &len, &tr);
+    assert(safe);
+    assert(len == 5);
+    int expected_seq[5] = { 1, 3, 0, 2, 4 };
+    assert(memcmp(seq, expected_seq, sizeof(expected_seq)) == 0);
+
+    /* Point 2: Step count == 5 */
+    assert(tr.count == 5);
+
+    /* Point 3 & 4: Work vector and Finish array before each iteration */
+    int expected_work[5][3] = {
+        { 3, 3, 2 },
+        { 5, 3, 2 },
+        { 7, 4, 3 },
+        { 7, 5, 3 },
+        { 10, 5, 5 }
+    };
+    bool expected_finish[5][BANKER_MAX_PROCS] = {
+        { false, false, false, false, false },
+        { false, true,  false, false, false },
+        { false, true,  false, true,  false },
+        { true,  true,  false, true,  false },
+        { true,  true,  true,  true,  false }
+    };
+
+    for (int s = 0; s < 5; s++) {
+        assert(tr.steps[s].picked == expected_seq[s]);
+        assert(memcmp(tr.steps[s].work, expected_work[s], (size_t)m.current_state.m * sizeof(int)) == 0);
+        assert(memcmp(tr.steps[s].finish, expected_finish[s], (size_t)m.current_state.n * sizeof(bool)) == 0);
+    }
+
+    /* Point 5: Final Work vector matches system Total [10, 5, 7] */
+    int expected_total[3] = { 10, 5, 7 };
+    assert(memcmp(tr.final_work, expected_total, sizeof(expected_total)) == 0);
+    assert(memcmp(m.current_state.total, tr.final_work, sizeof(expected_total)) == 0);
+
+    printf("  -> Passed (trace matches exact Work evolution and Finish array states).\n");
+    fflush(stdout);
+}
+
+static void test_unsafe_scenario_trace_and_stuck_diagnostic(void) {
+    printf("[TEST 17/21] Unsafe scenario trace: stuck iteration (picked == -1) and incomplete Finish array...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+
+    char err[256] = {0};
+    bool loaded = gui_model_load_scenario(&m, "tests/scenarios/unsafe_initial.txt", err, sizeof(err));
+    assert(loaded);
+    assert(m.is_loaded);
+
+    int seq[BANKER_MAX_PROCS] = {0};
+    int len = 0;
+    Trace tr;
+    memset(&tr, 0, sizeof(tr));
+
+    bool safe = gui_model_is_safe(&m, seq, &len, &tr);
+    assert(!safe);
+    assert(!tr.safe);
+    assert(tr.count > 0);
+
+    /* Final step must represent stuck iteration with picked == -1 */
+    const TraceStep *last_step = &tr.steps[tr.count - 1];
+    assert(last_step->picked == -1);
+
+    /* Verify at least one process remained unfinished */
+    bool has_unfinished = false;
+    for (int p = 0; p < m.current_state.n; p++) {
+        if (!last_step->finish[p]) {
+            has_unfinished = true;
+            break;
+        }
+    }
+    assert(has_unfinished);
+
+    printf("  -> Passed (stuck iteration picked == -1 verified on unsafe_initial.txt).\n");
+    fflush(stdout);
+}
+
+static void test_request_submission_granted_and_versioning(void) {
+    printf("[TEST 18/21] Request granted (P1 asks [1,0,2]), draft sync, state commit, and rollback restoration...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    uint64_t v_init = m.state_version;
+    assert(v_init >= 1);
+    assert(m.current_state.alloc[1][0] == 2);
+    assert(m.current_state.alloc[1][1] == 0);
+    assert(m.current_state.alloc[1][2] == 0);
+    assert(m.current_state.available[0] == 3);
+    assert(m.current_state.available[1] == 3);
+    assert(m.current_state.available[2] == 2);
+
+    /* P1 requests [1, 0, 2] */
+    int req[3] = { 1, 0, 2 };
+    Trace tr;
+    memset(&tr, 0, sizeof(tr));
+
+    RequestResult res = gui_model_submit_request(&m, 1, req, &tr);
+    assert(res == REQ_GRANTED);
+    assert(tr.safe);
+
+    /* Point 7 & 20: State committed, version advanced exactly once */
+    assert(m.state_version == v_init + 1);
+    assert(m.current_state.alloc[1][0] == 3);
+    assert(m.current_state.alloc[1][1] == 0);
+    assert(m.current_state.alloc[1][2] == 2);
+    assert(m.current_state.available[0] == 2);
+    assert(m.current_state.available[1] == 3);
+    assert(m.current_state.available[2] == 0);
+
+    /* Point 18: Draft state synchronized with committed state */
+    assert(!gui_model_has_uncommitted_draft(&m));
+    assert(m.draft_state.alloc[1][0] == 3);
+    assert(m.draft_state.alloc[1][2] == 2);
+    assert(m.draft_state.available[0] == 2);
+    assert(m.draft_state.available[2] == 0);
+
+    /* Point 19: Original baseline remains intact and can be restored */
+    assert(m.original_state.alloc[1][0] == 2);
+    assert(m.original_state.alloc[1][2] == 0);
+    assert(m.original_state.available[0] == 3);
+    assert(m.original_state.available[2] == 2);
+
+    bool reset_ok = gui_model_reset_to_original(&m);
+    assert(reset_ok);
+    assert(m.state_version == v_init + 2);
+    assert(m.current_state.alloc[1][0] == 2);
+    assert(m.current_state.alloc[1][2] == 0);
+    assert(m.current_state.available[0] == 3);
+    assert(m.current_state.available[2] == 2);
+    assert(!gui_model_has_uncommitted_draft(&m));
+
+    printf("  -> Passed (granted request commits state, syncs draft, advances version, reset restores baseline).\n");
+    fflush(stdout);
+}
+
+static void test_request_validation_rejections_and_rollback(void) {
+    printf("[TEST 19/21] Request rejection codes (Exceeds Need, Wait Unavailable, Denied Unsafe, Bad Input, Zero)...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    BankerState baseline = m.current_state;
+    uint64_t v_baseline = m.state_version;
+
+    /* Point 8: Exceeds Need (P1 asks [1, 3, 0], Need is [1, 2, 2]) */
+    int req_exceed[3] = { 1, 3, 0 };
+    RequestResult r_exceed = gui_model_submit_request(&m, 1, req_exceed, NULL);
+    assert(r_exceed == REQ_ERR_EXCEEDS_NEED);
+    assert(m.state_version == v_baseline);
+    assert(memcmp(&m.current_state, &baseline, sizeof(BankerState)) == 0);
+
+    /* Point 9: Wait Unavailable (P4 asks [3, 3, 0] after P1 grant, where Avail is [2, 3, 0]) */
+    int req_p1[3] = { 1, 0, 2 };
+    assert(gui_model_submit_request(&m, 1, req_p1, NULL) == REQ_GRANTED);
+    uint64_t v_after_p1 = m.state_version;
+    BankerState state_after_p1 = m.current_state;
+
+    int req_wait[3] = { 3, 3, 0 };
+    RequestResult r_wait = gui_model_submit_request(&m, 4, req_wait, NULL);
+    assert(r_wait == REQ_WAIT_UNAVAILABLE);
+    assert(m.state_version == v_after_p1);
+    assert(memcmp(&m.current_state, &state_after_p1, sizeof(BankerState)) == 0);
+
+    /* Reset to baseline for Point 10 */
+    gui_model_reset_to_original(&m);
+    baseline = m.current_state;
+    v_baseline = m.state_version;
+
+    /* Point 10: Denied Unsafe (P4 asks [3, 3, 0] from original state, Available [3, 3, 2]) */
+    Trace tr_unsafe;
+    memset(&tr_unsafe, 0, sizeof(tr_unsafe));
+    RequestResult r_unsafe = gui_model_submit_request(&m, 4, req_wait, &tr_unsafe);
+    assert(r_unsafe == REQ_DENIED_UNSAFE);
+    assert(!tr_unsafe.safe);
+    assert(m.state_version == v_baseline);
+    assert(memcmp(&m.current_state, &baseline, sizeof(BankerState)) == 0);
+
+    /* Point 11: Invalid process index */
+    int zero[3] = { 0, 0, 0 };
+    assert(gui_model_submit_request(&m, -1, zero, NULL) == REQ_ERR_BAD_INPUT);
+    assert(gui_model_submit_request(&m, 5, zero, NULL) == REQ_ERR_BAD_INPUT);
+    assert(m.state_version == v_baseline);
+
+    /* Point 12: Negative request */
+    int neg[3] = { -1, 0, 0 };
+    assert(gui_model_submit_request(&m, 0, neg, NULL) == REQ_ERR_BAD_INPUT);
+    assert(m.state_version == v_baseline);
+
+    /* Point 13: Zero request returns REQ_GRANTED without advancing version */
+    assert(gui_model_submit_request(&m, 0, zero, NULL) == REQ_GRANTED);
+    assert(m.state_version == v_baseline);
+    assert(memcmp(&m.current_state, &baseline, sizeof(BankerState)) == 0);
+
+    printf("  -> Passed (all 6 request result branches audited with exact state/version preservation).\n");
+    fflush(stdout);
+}
+
+static int g_obs1_calls = 0;
+static int g_obs2_calls = 0;
+static void test_observer_1(GuiModel *m, void *ud) { (void)m; (void)ud; g_obs1_calls++; }
+static void test_observer_2(GuiModel *m, void *ud) { (void)m; (void)ud; g_obs2_calls++; }
+
+static void test_request_observers_and_notifications(void) {
+    printf("[TEST 20/21] Observer notification semantics: multi-subscriber, deduplication, removal, and failed silence...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    g_obs1_calls = 0;
+    g_obs2_calls = 0;
+
+    /* Register observers */
+    assert(gui_model_add_observer(&m, test_observer_1, NULL));
+    assert(gui_model_add_observer(&m, test_observer_2, NULL));
+
+    /* Deduplication test: re-adding returns true and does not register duplicate */
+    assert(gui_model_add_observer(&m, test_observer_1, NULL));
+    assert(m.observer_count == 2);
+
+    /* Point 14: Failed request does not notify observers */
+    int req_bad[3] = { 1, 3, 0 };
+    assert(gui_model_submit_request(&m, 1, req_bad, NULL) == REQ_ERR_EXCEEDS_NEED);
+    assert(g_obs1_calls == 0);
+    assert(g_obs2_calls == 0);
+
+    /* Zero request does not notify observers */
+    int req_zero[3] = { 0, 0, 0 };
+    assert(gui_model_submit_request(&m, 0, req_zero, NULL) == REQ_GRANTED);
+    assert(g_obs1_calls == 0);
+    assert(g_obs2_calls == 0);
+
+    /* Point 15 & 16: Granted request notifies all registered observers */
+    int req_ok[3] = { 1, 0, 2 };
+    assert(gui_model_submit_request(&m, 1, req_ok, NULL) == REQ_GRANTED);
+    assert(g_obs1_calls == 1);
+    assert(g_obs2_calls == 1);
+
+    /* Observer removal */
+    assert(gui_model_remove_observer(&m, test_observer_1, NULL));
+    assert(m.observer_count == 1);
+
+    /* Next operation (reset baseline) notifies only remaining observer */
+    gui_model_reset_to_original(&m);
+    assert(g_obs1_calls == 1);
+    assert(g_obs2_calls == 2);
+
+    /* Remove observer 2 */
+    assert(gui_model_remove_observer(&m, test_observer_2, NULL));
+    assert(m.observer_count == 0);
+
+    /* Removing non-registered observer returns false */
+    assert(!gui_model_remove_observer(&m, test_observer_1, NULL));
+
+    printf("  -> Passed (observer multi-subscription, deduplication, removal, and notification verified).\n");
+    fflush(stdout);
+}
+
+static void test_uncommitted_draft_blocks_request(void) {
+    printf("[TEST 21/21] Uncommitted draft mismatch blocks request submission (REQ_ERR_BAD_STATE)...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_init_demo(&m);
+
+    assert(!gui_model_has_uncommitted_draft(&m));
+
+    /* Modify draft allocation */
+    int orig = m.draft_state.alloc[0][0];
+    gui_model_set_draft_alloc(&m, 0, 0, orig + 1);
+    assert(gui_model_has_uncommitted_draft(&m));
+
+    /* Point 17: Request submission blocked when uncommitted draft exists */
+    int req[3] = { 1, 0, 2 };
+    RequestResult res = gui_model_submit_request(&m, 1, req, NULL);
+    assert(res == REQ_ERR_BAD_STATE);
+
+    /* Discard draft changes */
+    gui_model_init_draft_from_current(&m);
+    assert(!gui_model_has_uncommitted_draft(&m));
+
+    /* Now request submission succeeds */
+    res = gui_model_submit_request(&m, 1, req, NULL);
+    assert(res == REQ_GRANTED);
+
+    printf("  -> Passed (uncommitted draft detection blocks submission until committed/discarded).\n");
+    fflush(stdout);
+}
+
 int main(void) {
     printf("\n============================================================\n");
     printf(" RESOURCEGUARD GUI MODEL & APPLICATION CONTROLLER TESTS\n");
@@ -695,9 +1007,15 @@ int main(void) {
     test_resource_lookup_order_and_unrelated_cwd();
     test_absolute_scenario_path();
     test_demo_fallback_metadata_and_invalid_demo_rejection();
+    test_safety_trace_work_finish_vectors();
+    test_unsafe_scenario_trace_and_stuck_diagnostic();
+    test_request_submission_granted_and_versioning();
+    test_request_validation_rejections_and_rollback();
+    test_request_observers_and_notifications();
+    test_uncommitted_draft_blocks_request();
 
     printf("\n============================================================\n");
-    printf(" ALL 15 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
+    printf(" ALL 21 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
     printf("============================================================\n\n");
     fflush(stdout);
     return 0;

@@ -9,8 +9,8 @@
 
 GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window);
 GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window);
-GtkWidget *gui_page_safety_create(void);
-GtkWidget *gui_page_simulator_create(void);
+GtkWidget *gui_page_safety_create(GuiModel *model, GtkWidget *window);
+GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window);
 GtkWidget *gui_page_whynot_create(void);
 GtkWidget *gui_page_concurrency_create(void);
 GtkWidget *gui_page_history_create(void);

@@ -13,6 +13,7 @@
 
 #define GUI_MAX_PATH_LEN 512
 #define GUI_MAX_MSG_LEN  256
+#define GUI_MODEL_MAX_OBSERVERS 16
 
 /* Snapshot structure capturing dashboard-ready telemetry */
 typedef struct {
@@ -34,6 +35,11 @@ typedef struct GuiModel GuiModel;
 
 typedef void (*GuiModelChangeListener)(GuiModel *model, void *user_data);
 
+typedef struct {
+    GuiModelChangeListener fn;
+    void *user_data;
+} GuiModelObserver;
+
 struct GuiModel {
     /* Authoritative committed state */
     BankerState current_state;
@@ -53,15 +59,23 @@ struct GuiModel {
     char scenario_name[128];
     uint64_t state_version;
 
-    /* Listener callback */
+    /* Primary listener callback (for backwards compatibility) */
     GuiModelChangeListener listener;
     void *listener_user_data;
+
+    /* Multi-subscriber observer callbacks */
+    GuiModelObserver observers[GUI_MODEL_MAX_OBSERVERS];
+    int observer_count;
 };
 
 /* Lifecycle */
 void gui_model_init(GuiModel *m);
 void gui_model_load_demo(GuiModel *m);
 void gui_model_init_demo(GuiModel *m);
+
+/* Observer registration & notification */
+bool gui_model_add_observer(GuiModel *m, GuiModelChangeListener cb, void *user_data);
+bool gui_model_remove_observer(GuiModel *m, GuiModelChangeListener cb, void *user_data);
 void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data);
 
 /* Scenario management & path resolution */
@@ -71,6 +85,7 @@ bool gui_model_reset_to_original(GuiModel *m);
 
 /* Draft editing & validation */
 void gui_model_init_draft_from_current(GuiModel *m);
+bool gui_model_has_uncommitted_draft(const GuiModel *m);
 bool gui_model_set_draft_dimensions(GuiModel *m, int n, int res_m);
 void gui_model_set_draft_total(GuiModel *m, int res, int val);
 void gui_model_set_draft_available(GuiModel *m, int res, int val);
@@ -81,6 +96,9 @@ void gui_model_auto_calculate_draft_available(GuiModel *m);
 /* Validation & commit */
 BankerStatus gui_model_validate_draft(GuiModel *m);
 bool gui_model_commit_draft(GuiModel *m);
+
+/* Transactional resource request */
+RequestResult gui_model_submit_request(GuiModel *m, int pid, const int req[], Trace *trace);
 
 /* Queries */
 void gui_model_get_current_need(const GuiModel *m, int need[BANKER_MAX_PROCS][BANKER_MAX_RES]);

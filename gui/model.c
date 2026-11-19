@@ -187,8 +187,11 @@ bool gui_model_resolve_resource_path(const char *rel_path, char *out, size_t out
 }
 
 static void notify_change(GuiModel *m) {
-    if (m && m->listener) {
-        m->listener(m, m->listener_user_data);
+    if (!m) return;
+    for (int i = 0; i < m->observer_count; i++) {
+        if (m->observers[i].fn) {
+            m->observers[i].fn(m, m->observers[i].user_data);
+        }
     }
 }
 
@@ -203,6 +206,50 @@ void gui_model_init(GuiModel *m) {
     m->draft_validation_msg[0] = '\0';
     m->listener = NULL;
     m->listener_user_data = NULL;
+    m->observer_count = 0;
+}
+
+bool gui_model_add_observer(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
+    if (!m || !cb) return false;
+    for (int i = 0; i < m->observer_count; i++) {
+        if (m->observers[i].fn == cb && m->observers[i].user_data == user_data) {
+            return true; /* already registered */
+        }
+    }
+    if (m->observer_count >= GUI_MODEL_MAX_OBSERVERS) {
+        return false;
+    }
+    m->observers[m->observer_count].fn = cb;
+    m->observers[m->observer_count].user_data = user_data;
+    m->observer_count++;
+    return true;
+}
+
+bool gui_model_remove_observer(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
+    if (!m || !cb) return false;
+    for (int i = 0; i < m->observer_count; i++) {
+        if (m->observers[i].fn == cb && m->observers[i].user_data == user_data) {
+            for (int j = i; j < m->observer_count - 1; j++) {
+                m->observers[j] = m->observers[j + 1];
+            }
+            m->observer_count--;
+            m->observers[m->observer_count].fn = NULL;
+            m->observers[m->observer_count].user_data = NULL;
+            return true;
+        }
+    }
+    return false;
+}
+
+void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
+    if (!m) return;
+    m->listener = cb;
+    m->listener_user_data = user_data;
+    m->observer_count = 0;
+    memset(m->observers, 0, sizeof(m->observers));
+    if (cb) {
+        gui_model_add_observer(m, cb, user_data);
+    }
 }
 
 void gui_model_load_demo(GuiModel *m) {
@@ -276,12 +323,6 @@ void gui_model_init_demo(GuiModel *m) {
     gui_model_load_demo(m);
 }
 
-void gui_model_set_listener(GuiModel *m, GuiModelChangeListener cb, void *user_data) {
-    if (!m) return;
-    m->listener = cb;
-    m->listener_user_data = user_data;
-}
-
 bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_t err_len) {
     if (!m || !path) {
         if (err_buf && err_len > 0) snprintf(err_buf, err_len, "Invalid argument to load_scenario");
@@ -341,6 +382,24 @@ void gui_model_init_draft_from_current(GuiModel *m) {
     if (!m) return;
     m->draft_state = m->current_state;
     gui_model_validate_draft(m);
+}
+
+bool gui_model_has_uncommitted_draft(const GuiModel *m) {
+    if (!m || !m->is_loaded) return false;
+    if (m->draft_state.n != m->current_state.n || m->draft_state.m != m->current_state.m) {
+        return true;
+    }
+    for (int j = 0; j < m->current_state.m; j++) {
+        if (m->draft_state.total[j] != m->current_state.total[j]) return true;
+        if (m->draft_state.available[j] != m->current_state.available[j]) return true;
+    }
+    for (int i = 0; i < m->current_state.n; i++) {
+        for (int j = 0; j < m->current_state.m; j++) {
+            if (m->draft_state.max[i][j] != m->current_state.max[i][j]) return true;
+            if (m->draft_state.alloc[i][j] != m->current_state.alloc[i][j]) return true;
+        }
+    }
+    return false;
 }
 
 bool gui_model_set_draft_dimensions(GuiModel *m, int n, int res_m) {
@@ -511,6 +570,45 @@ bool gui_model_commit_draft(GuiModel *m) {
 
     notify_change(m);
     return true;
+}
+
+RequestResult gui_model_submit_request(GuiModel *m, int pid, const int req[], Trace *trace) {
+    if (trace) memset(trace, 0, sizeof(*trace));
+    if (!m || !m->is_loaded) return REQ_ERR_BAD_STATE;
+
+    /* 1. Committed state must be valid */
+    int bp = -1, br = -1;
+    if (banker_validate(&m->current_state, &bp, &br) != BANKER_OK) {
+        return REQ_ERR_BAD_STATE;
+    }
+
+    /* 2. Disallow request if there is an uncommitted draft conflicting with current state */
+    if (gui_model_has_uncommitted_draft(m)) {
+        return REQ_ERR_BAD_STATE;
+    }
+
+    /* 3. Run request on a temporary copy via authoritative Banker engine */
+    BankerState copy = m->current_state;
+    RequestResult res = banker_request(&copy, pid, req, trace);
+
+    /* 4. On REQ_GRANTED, commit to model only if state actually changed */
+    if (res == REQ_GRANTED) {
+        bool changed = false;
+        for (int j = 0; j < m->current_state.m; j++) {
+            if (copy.available[j] != m->current_state.available[j]) { changed = true; break; }
+            if (copy.alloc[pid][j] != m->current_state.alloc[pid][j]) { changed = true; break; }
+        }
+
+        if (changed) {
+            m->current_state = copy;
+            m->draft_state = copy;  /* keep draft in sync with committed state */
+            m->state_version++;     /* advance version monotonically */
+            gui_model_validate_draft(m);
+            notify_change(m);       /* notify observers of committed state change */
+        }
+    }
+
+    return res;
 }
 
 void gui_model_get_current_need(const GuiModel *m, int need[BANKER_MAX_PROCS][BANKER_MAX_RES]) {

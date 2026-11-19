@@ -184,6 +184,14 @@ static void on_dashboard_model_changed(GuiModel *model, void *user_data) {
     dashboard_refresh((DashboardWidgets *)user_data);
 }
 
+static void on_dashboard_destroy(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    DashboardWidgets *w = (DashboardWidgets *)user_data;
+    if (w && w->model) {
+        gui_model_remove_observer(w->model, on_dashboard_model_changed, w);
+    }
+}
+
 static void on_dashboard_map(GtkWidget *widget, gpointer user_data) {
     (void)widget;
     dashboard_refresh((DashboardWidgets *)user_data);
@@ -215,6 +223,7 @@ GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window) {
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     g_object_set_data_full(G_OBJECT(page_box), "widgets", w, g_free);
     g_signal_connect(page_box, "map", G_CALLBACK(on_dashboard_map), w);
+    g_signal_connect(page_box, "destroy", G_CALLBACK(on_dashboard_destroy), w);
 
     /* Header Card */
     GtkWidget *header_card = create_card("System Dashboard",
@@ -321,8 +330,8 @@ GtkWidget *gui_page_dashboard_create(GuiModel *model, GtkWidget *window) {
 
     gtk_box_append(GTK_BOX(page_box), w->content_box);
 
-    /* Register listener and initial refresh */
-    gui_model_set_listener(model, on_dashboard_model_changed, w);
+    /* Register observer and initial refresh */
+    gui_model_add_observer(model, on_dashboard_model_changed, w);
     dashboard_refresh(w);
 
     return wrap_in_scrolled_window(page_box);
@@ -731,6 +740,25 @@ static void on_resources_map(GtkWidget *widget, gpointer user_data) {
     rebuild_matrix_grids(w);
 }
 
+static void on_resources_model_changed(GuiModel *model, void *user_data) {
+    (void)model;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (!w || !w->model) return;
+    w->updating_ui = true;
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_n), w->model->draft_state.n);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->spin_m), w->model->draft_state.m);
+    w->updating_ui = false;
+    rebuild_matrix_grids(w);
+}
+
+static void on_resources_destroy(GtkWidget *widget, gpointer user_data) {
+    (void)widget;
+    ResourcesWidgets *w = (ResourcesWidgets *)user_data;
+    if (w && w->model) {
+        gui_model_remove_observer(w->model, on_resources_model_changed, w);
+    }
+}
+
 GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     ResourcesWidgets *w = g_new0(ResourcesWidgets, 1);
     w->model = model;
@@ -739,6 +767,8 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     GtkWidget *page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     g_object_set_data_full(G_OBJECT(page_box), "widgets", w, g_free);
     g_signal_connect(page_box, "map", G_CALLBACK(on_resources_map), w);
+    g_signal_connect(page_box, "destroy", G_CALLBACK(on_resources_destroy), w);
+    gui_model_add_observer(model, on_resources_model_changed, w);
 
     /* Header Card */
     GtkWidget *header_card = create_card("System Resources & Allocation Matrices",
@@ -868,32 +898,6 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
     rebuild_matrix_grids(w);
 
     return wrap_in_scrolled_window(page_box);
-}
-
-/* ------------------------------------------------------------------ */
-/*  3. Safety Analysis Page (Placeholder - Milestone 5)                */
-/* ------------------------------------------------------------------ */
-
-GtkWidget *gui_page_safety_create(void) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    GtkWidget *card = create_card("Safety Algorithm & Trace Engine",
-                                  "Interactive step-by-step replay of Banker's safety verification.");
-    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Safety Sequence Step-Through Visualizer", "Milestone 5"));
-    gtk_box_append(GTK_BOX(box), card);
-    return wrap_in_scrolled_window(box);
-}
-
-/* ------------------------------------------------------------------ */
-/*  4. Request Simulator Page (Placeholder - Milestone 5)              */
-/* ------------------------------------------------------------------ */
-
-GtkWidget *gui_page_simulator_create(void) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    GtkWidget *card = create_card("Request Simulator & Transaction Controls",
-                                  "Simulate interactive process resource requests and atomic trial allocations.");
-    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Interactive Request Dispatcher", "Milestone 5"));
-    gtk_box_append(GTK_BOX(box), card);
-    return wrap_in_scrolled_window(box);
 }
 
 /* ------------------------------------------------------------------ */

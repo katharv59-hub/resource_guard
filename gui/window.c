@@ -52,8 +52,8 @@ GtkWidget *gui_window_new(GtkApplication *app) {
     /* Add all 7 navigation pages */
     gtk_stack_add_titled(GTK_STACK(stack), gui_page_dashboard_create(model, win),   "dashboard",   "Dashboard");
     gtk_stack_add_titled(GTK_STACK(stack), gui_page_resources_create(model, win),   "resources",   "System Resources");
-    gtk_stack_add_titled(GTK_STACK(stack), gui_page_safety_create(),      "safety",      "Safety Analysis");
-    gtk_stack_add_titled(GTK_STACK(stack), gui_page_simulator_create(),   "simulator",   "Request Simulator");
+    gtk_stack_add_titled(GTK_STACK(stack), gui_page_safety_create(model, win),      "safety",      "Safety Analysis");
+    gtk_stack_add_titled(GTK_STACK(stack), gui_page_simulator_create(model, win),   "simulator",   "Request Simulator");
     gtk_stack_add_titled(GTK_STACK(stack), gui_page_whynot_create(),      "whynot",      "Why-not Intelligence");
     gtk_stack_add_titled(GTK_STACK(stack), gui_page_concurrency_create(), "concurrency", "Concurrency Lab");
     gtk_stack_add_titled(GTK_STACK(stack), gui_page_history_create(),      "history",      "Event History");
