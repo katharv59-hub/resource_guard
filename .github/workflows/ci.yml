@@ -80,7 +80,7 @@ jobs:
       - name: Run GTK4 Application Smoke Test
         run: |
           GDK_BACKEND=x11 GSK_RENDERER=cairo xvfb-run -s "-screen 0 1280x800x24" \
-            ./resourceguard_gui --smoke-test --screenshot smoke_snapshot.png
+            ./resourceguard_gui --smoke-test
 
       - name: Capture Live X11 Window Screenshot
         run: |
@@ -93,6 +93,12 @@ jobs:
             GDK_BACKEND=x11 GSK_RENDERER=cairo ./resourceguard_gui &
             GUI_PID=$!
             sleep 3
+
+            # Verify GUI process is still alive and did not crash on startup
+            if ! kill -0 $GUI_PID 2>/dev/null; then
+              echo "ERROR: resourceguard_gui crashed or exited unexpectedly!"
+              exit 1
+            fi
 
             scrot -z screenshot.png
 
@@ -107,40 +113,36 @@ jobs:
           import sys, os
           from PIL import Image
 
-          found = False
-          for target in ['screenshot.png', 'smoke_snapshot.png']:
-              if os.path.exists(target):
-                  size = os.path.getsize(target)
-                  print(f'Inspecting {target}: file size = {size} bytes')
-                  if size < 1000:
-                      print(f'FAILURE: {target} is suspiciously small ({size} bytes).')
-                      sys.exit(1)
-
-                  img = Image.open(target)
-                  print(f'Dimensions: {img.size}')
-                  extrema = img.getextrema()
-                  print(f'Pixel extrema: {extrema}')
-
-                  colors = img.getcolors(maxcolors=200000)
-                  n_colors = len(colors) if colors else 200000
-                  print(f'Unique colors: {n_colors}')
-
-                  max_val = max(e[1] if isinstance(e, tuple) else e for e in extrema)
-                  if max_val < 30:
-                      print(f'FAILURE: {target} is completely black (max pixel value: {max_val}).')
-                      sys.exit(1)
-
-                  if n_colors < 10:
-                      print(f'FAILURE: {target} lacks visual structure ({n_colors} unique colors).')
-                      sys.exit(1)
-
-                  print(f'VALIDATION SUCCESS: {target} contains authentic rendered GUI content ({n_colors} colors, {size} bytes).')
-                  found = True
-                  break
-
-          if not found:
-              print('FAILURE: No valid screenshot file was generated.')
+          target = 'screenshot.png'
+          if not os.path.exists(target):
+              print(f'FAILURE: {target} was not generated.')
               sys.exit(1)
+
+          size = os.path.getsize(target)
+          print(f'Inspecting {target}: file size = {size} bytes')
+          if size < 1000:
+              print(f'FAILURE: {target} is suspiciously small ({size} bytes).')
+              sys.exit(1)
+
+          img = Image.open(target)
+          print(f'Dimensions: {img.size}')
+          extrema = img.getextrema()
+          print(f'Pixel extrema: {extrema}')
+
+          colors = img.getcolors(maxcolors=200000)
+          n_colors = len(colors) if colors else 200000
+          print(f'Unique colors: {n_colors}')
+
+          max_val = max(e[1] if isinstance(e, tuple) else e for e in extrema)
+          if max_val < 30:
+              print(f'FAILURE: {target} is completely black (max pixel value: {max_val}).')
+              sys.exit(1)
+
+          if n_colors < 10:
+              print(f'FAILURE: {target} lacks visual structure ({n_colors} unique colors).')
+              sys.exit(1)
+
+          print(f'VALIDATION SUCCESS: {target} contains authentic rendered GUI content ({n_colors} colors, {size} bytes).')
           "
 
       - name: Upload GTK4 Application Screenshot
@@ -148,7 +150,5 @@ jobs:
         if: always()
         with:
           name: gtk4-app-screenshot
-          path: |
-            screenshot.png
-            smoke_snapshot.png
+          path: screenshot.png
           if-no-files-found: error

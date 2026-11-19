@@ -16,13 +16,8 @@ static void process_pending_events(void) {
 }
 
 int gui_smoke_test_main(int argc, char *argv[]) {
-    const char *screenshot_file = NULL;
-    for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "--screenshot") == 0 || strcmp(argv[i], "-s") == 0) && i + 1 < argc) {
-            screenshot_file = argv[i + 1];
-            i++;
-        }
-    }
+    (void)argc;
+    (void)argv;
 
     printf("\n============================================================\n");
     printf(" RESOURCEGUARD GTK4 SMOKE TEST (HEADLESS VERIFICATION)\n");
@@ -159,26 +154,6 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "dashboard");
     process_pending_events();
     printf("  -> OK: Programmatic page switching verified for all 7 views.\n");
-
-    /* Optional Native Snapshot Capture */
-    if (screenshot_file) {
-        printf("Capturing native widget snapshot to '%s'...\n", screenshot_file);
-        GtkWidgetPaintable *paintable = gtk_widget_paintable_new(win);
-        if (paintable) {
-            GdkPaintable *p = GDK_PAINTABLE(paintable);
-            GdkTexture *texture = GDK_TEXTURE(gdk_paintable_get_current_image(p));
-            if (texture) {
-                GError *save_err = NULL;
-                if (!gdk_texture_save_to_png(texture, screenshot_file)) {
-                    fprintf(stderr, "WARNING: gdk_texture_save_to_png() failed.\n");
-                } else {
-                    printf("  -> OK: Native GTK snapshot written to '%s'.\n", screenshot_file);
-                }
-                g_object_unref(texture);
-            }
-            g_object_unref(paintable);
-        }
-    }
 
     /* CHECK 8: Clean Teardown and Exit */
     printf("[CHECK 8/8] Tearing down window and releasing resources...\n");
