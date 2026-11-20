@@ -637,7 +637,7 @@ GtkWidget *gui_page_whynot_create(GuiModel *model, GtkWidget *window) {
     w->label_stall_explanation = gtk_label_new(
         "ALGORITHMIC STALL DETECTED (UNSAFE STATE):\n"
         "Granting this request would leave available resources insufficient to guarantee process completion under worst-case demands. "
-        "IMPORTANT: An unsafe state is NOT an active deadlock; processes may continue executing, but the operating system cannot "
+        "IMPORTANT: An unsafe state is NOT AN ACTIVE DEADLOCK; processes may continue executing, but the operating system cannot "
         "guarantee avoidance of future deadlock if processes exercise their full declared maximum demands.");
     gtk_label_set_wrap(GTK_LABEL(w->label_stall_explanation), TRUE);
     gtk_label_set_xalign(GTK_LABEL(w->label_stall_explanation), 0.0f);

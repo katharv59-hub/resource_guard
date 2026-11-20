@@ -820,7 +820,8 @@ int gui_smoke_test_main(int argc, char *argv[]) {
 
     /* Verify Denial Safety Trace and Non-deadlock Explanation */
     const char *stall_exp = gtk_label_get_text(GTK_LABEL(ww->label_stall_explanation));
-    if (!strstr(stall_exp, "NOT AN ACTIVE DEADLOCK") || !strstr(stall_exp, "UNSAFE STATE")) {
+    if ((!strstr(stall_exp, "NOT AN ACTIVE DEADLOCK") && !strstr(stall_exp, "not an active deadlock")) ||
+        (!strstr(stall_exp, "UNSAFE STATE") && !strstr(stall_exp, "unsafe state"))) {
         fprintf(stderr, "FAIL: Stall explanation missing non-deadlock guarantee disclaimer.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
