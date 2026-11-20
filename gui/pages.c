@@ -898,19 +898,6 @@ GtkWidget *gui_page_resources_create(GuiModel *model, GtkWidget *window) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  5. Why-not Intelligence Page (Placeholder - Milestone 6)          */
-/* ------------------------------------------------------------------ */
-
-GtkWidget *gui_page_whynot_create(void) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    GtkWidget *card = create_card("Why-not Diagnostic Intelligence",
-                                  "Root-cause analysis of rejected requests and safe-region geometry.");
-    gtk_box_append(GTK_BOX(card), create_placeholder_banner("Safe-Region Geometric Map & Manhattan Distance", "Milestone 6"));
-    gtk_box_append(GTK_BOX(box), card);
-    return wrap_in_scrolled_window(box);
-}
-
-/* ------------------------------------------------------------------ */
 /*  6. Concurrency Lab Page (Placeholder - Milestone 7)                */
 /* ------------------------------------------------------------------ */
 

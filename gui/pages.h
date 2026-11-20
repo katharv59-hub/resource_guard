@@ -73,7 +73,7 @@ ResourcesWidgets *gui_resources_view_get_widgets(GtkWidget *page_widget);
 
 GtkWidget *gui_page_safety_create(GuiModel *model, GtkWidget *window);
 GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window);
-GtkWidget *gui_page_whynot_create(void);
+GtkWidget *gui_page_whynot_create(GuiModel *model, GtkWidget *window);
 GtkWidget *gui_page_concurrency_create(void);
 GtkWidget *gui_page_history_create(void);
 

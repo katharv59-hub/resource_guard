@@ -10,6 +10,7 @@
 #include "model.h"
 #include "safety_view.h"
 #include "request_view.h"
+#include "whynot_view.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -704,6 +705,203 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Verify Why-not Diagnostic View interactive components */
+    GtkWidget *whynot_page = gtk_stack_get_child_by_name(GTK_STACK(stack), "whynot");
+    if (!whynot_page) {
+        fprintf(stderr, "FAIL: Why-not page missing from stack.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    WhynotWidgets *ww = gui_whynot_view_get_widgets(whynot_page);
+    if (!ww) {
+        fprintf(stderr, "FAIL: WhynotWidgets handle not retrieved from whynot page.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify container visibility */
+    if (gtk_widget_get_visible(ww->empty_box)) {
+        fprintf(stderr, "FAIL: Why-not empty_box visible when rejection context exists.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_visible(ww->content_box)) {
+        fprintf(stderr, "FAIL: Why-not content_box hidden when rejection context exists.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify Header Badges */
+    const char *badge_proc_txt = gtk_label_get_text(GTK_LABEL(ww->badge_proc));
+    if (strcmp(badge_proc_txt, "P4") != 0) {
+        fprintf(stderr, "FAIL: Expected badge_proc 'P4', got '%s'.\n", badge_proc_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *badge_req_txt = gtk_label_get_text(GTK_LABEL(ww->badge_req));
+    if (!strstr(badge_req_txt, "3, 3, 0")) {
+        fprintf(stderr, "FAIL: Expected badge_req to contain '3, 3, 0', got '%s'.\n", badge_req_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *badge_ver_txt = gtk_label_get_text(GTK_LABEL(ww->badge_version));
+    if (!strstr(badge_ver_txt, "v1")) {
+        fprintf(stderr, "FAIL: Expected badge_version to contain 'v1', got '%s'.\n", badge_ver_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *badge_st_txt = gtk_label_get_text(GTK_LABEL(ww->badge_status));
+    if (strcmp(badge_st_txt, "COMPLETE") != 0) {
+        fprintf(stderr, "FAIL: Expected badge_status 'COMPLETE', got '%s'.\n", badge_st_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify Diagnostic Summary Metrics */
+    const char *tot_cand = gtk_label_get_text(GTK_LABEL(ww->label_total_candidates));
+    if (strcmp(tot_cand, "32") != 0) {
+        fprintf(stderr, "FAIL: Expected 32 total candidates, got '%s'.\n", tot_cand);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *safe_cand = gtk_label_get_text(GTK_LABEL(ww->label_safe_candidates));
+    if (!strstr(safe_cand, "24")) {
+        fprintf(stderr, "FAIL: Expected 24 safe candidates, got '%s'.\n", safe_cand);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *unsafe_cand = gtk_label_get_text(GTK_LABEL(ww->label_unsafe_candidates));
+    if (!strstr(unsafe_cand, "8")) {
+        fprintf(stderr, "FAIL: Expected 8 unsafe candidates, got '%s'.\n", unsafe_cand);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *near_safe = gtk_label_get_text(GTK_LABEL(ww->label_nearest_safe));
+    if (!strstr(near_safe, "3, 2, 0")) {
+        fprintf(stderr, "FAIL: Expected nearest safe request '[ 3, 2, 0 ]', got '%s'.\n", near_safe);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *near_dist = gtk_label_get_text(GTK_LABEL(ww->label_nearest_distance));
+    if (!strstr(near_dist, "1")) {
+        fprintf(stderr, "FAIL: Expected Manhattan distance 1, got '%s'.\n", near_dist);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *comp_max = gtk_label_get_text(GTK_LABEL(ww->label_compwise_max));
+    if (!strstr(comp_max, "3, 2, 1")) {
+        fprintf(stderr, "FAIL: Expected componentwise max '[ 3, 2, 1 ]', got '%s'.\n", comp_max);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *comp_safe = gtk_label_get_text(GTK_LABEL(ww->badge_compwise_safe));
+    if (strcmp(comp_safe, "JOINTLY SAFE") != 0) {
+        fprintf(stderr, "FAIL: Expected componentwise max to be 'JOINTLY SAFE', got '%s'.\n", comp_safe);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify Denial Safety Trace and Non-deadlock Explanation */
+    const char *stall_exp = gtk_label_get_text(GTK_LABEL(ww->label_stall_explanation));
+    if (!strstr(stall_exp, "NOT AN ACTIVE DEADLOCK") || !strstr(stall_exp, "UNSAFE STATE")) {
+        fprintf(stderr, "FAIL: Stall explanation missing non-deadlock guarantee disclaimer.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_first_child(ww->box_blocked_procs)) {
+        fprintf(stderr, "FAIL: Blocked processes list is empty in denial trace.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify Actionable Alternative: Load into Simulator */
+    g_signal_emit_by_name(ww->btn_load_simulator, "clicked");
+    process_pending_events();
+
+    const char *page_after_load = gtk_stack_get_visible_child_name(GTK_STACK(stack));
+    if (!page_after_load || strcmp(page_after_load, "simulator") != 0) {
+        fprintf(stderr, "FAIL: 'Load into Simulator' did not switch page to 'simulator' (got '%s').\n",
+                page_after_load ? page_after_load : "<null>");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    guint sel_proc = gtk_drop_down_get_selected(GTK_DROP_DOWN(rw->dropdown_proc));
+    if (sel_proc != 4) {
+        fprintf(stderr, "FAIL: 'Load into Simulator' selected process %u instead of 4.\n", sel_proc);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    double s0 = gtk_spin_button_get_value(GTK_SPIN_BUTTON(rw->spin_req[0]));
+    double s1 = gtk_spin_button_get_value(GTK_SPIN_BUTTON(rw->spin_req[1]));
+    double s2 = gtk_spin_button_get_value(GTK_SPIN_BUTTON(rw->spin_req[2]));
+    if ((int)s0 != 3 || (int)s1 != 2 || (int)s2 != 0) {
+        fprintf(stderr, "FAIL: Simulator inputs not populated with [3, 2, 0] (got [%.0f, %.0f, %.0f]).\n", s0, s1, s2);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    /* Verify request was NOT automatically submitted */
+    if (model->state_version != v_before_nav ||
+        memcmp(&model->current_state, &state_before_nav, sizeof(BankerState)) != 0) {
+        fprintf(stderr, "FAIL: 'Load into Simulator' erroneously submitted request!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Return to whynot page to test re-evaluation and draft warnings */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    /* Uncommitted draft test */
+    gui_model_set_draft_available(model, 0, 99);
+    process_pending_events();
+    if (!gtk_widget_get_visible(ww->banner_draft)) {
+        fprintf(stderr, "FAIL: Draft warning banner hidden when uncommitted draft exists.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_sensitive(ww->btn_reevaluate)) {
+        fprintf(stderr, "FAIL: Re-evaluate button sensitive when uncommitted draft exists.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    gui_model_init_draft_from_current(model);
+    process_pending_events();
+    if (gtk_widget_get_visible(ww->banner_draft)) {
+        fprintf(stderr, "FAIL: Draft warning banner visible after discarding draft.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_sensitive(ww->btn_reevaluate)) {
+        fprintf(stderr, "FAIL: Re-evaluate button insensitive after discarding draft.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
     /* Return to simulator */
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "simulator");
     process_pending_events();
@@ -804,7 +1002,37 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Reset baseline and verify button becomes hidden */
+    /* Verify Historical Diagnostic banner is displayed on Why-not page */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    if (!gtk_widget_get_visible(ww->banner_stale)) {
+        fprintf(stderr, "FAIL: Historical banner not visible on whynot page after state change.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *stale_txt = gtk_label_get_text(GTK_LABEL(ww->label_stale));
+    if (!strstr(stale_txt, "Historical Diagnostic") || !strstr(stale_txt, "State v1") || !strstr(stale_txt, "Current State is v2")) {
+        fprintf(stderr, "FAIL: Historical banner text did not report version divergence (got '%s').\n", stale_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Test Re-evaluate Against Current State:
+     * Current state has available R0 = 2, so P0's rejected request of [0, 3, 0] or P4 [3, 3, 0] can be tested. */
+    g_signal_emit_by_name(ww->btn_reevaluate, "clicked");
+    process_pending_events();
+    const char *reeval_txt = gtk_label_get_text(GTK_LABEL(ww->label_reeval_status));
+    if (!strstr(reeval_txt, "Re-evaluation")) {
+        fprintf(stderr, "FAIL: Re-evaluation status label did not report outcome (got '%s').\n", reeval_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Reset baseline and verify button becomes hidden and Why-not page reverts to empty state */
     gui_model_reset_to_original(model);
     process_pending_events();
 
@@ -816,6 +1044,12 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
     if (gtk_widget_get_visible(rw->btn_explain_rejection)) {
         fprintf(stderr, "FAIL: Explain Rejection button unexpectedly visible after baseline reset.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_visible(ww->empty_box) || gtk_widget_get_visible(ww->content_box)) {
+        fprintf(stderr, "FAIL: Why-not page did not revert to empty state after baseline reset.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
@@ -1105,18 +1339,19 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     gui_model_load_demo(model);
     process_pending_events();
 
-    if (model->observer_count != 4) {
-        fprintf(stderr, "FAIL: Expected 4 active observers, found %d.\n", model->observer_count);
+    if (model->observer_count != 5) {
+        fprintf(stderr, "FAIL: Expected 5 active observers, found %d.\n", model->observer_count);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
     }
 
-    /* 1. Remove Safety Analysis and Request Simulator pages from stack */
+    /* 1. Remove Safety Analysis, Request Simulator, and Why-not pages from stack */
     GtkWidget *cur_safety = gtk_stack_get_child_by_name(GTK_STACK(stack), "safety");
     GtkWidget *cur_sim = gtk_stack_get_child_by_name(GTK_STACK(stack), "simulator");
-    if (!cur_safety || !cur_sim) {
-        fprintf(stderr, "FAIL: Safety or Simulator page missing from stack.\n");
+    GtkWidget *cur_whynot = gtk_stack_get_child_by_name(GTK_STACK(stack), "whynot");
+    if (!cur_safety || !cur_sim || !cur_whynot) {
+        fprintf(stderr, "FAIL: Safety, Simulator, or Why-not page missing from stack.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
@@ -1124,11 +1359,12 @@ int gui_smoke_test_main(int argc, char *argv[]) {
 
     gtk_stack_remove(GTK_STACK(stack), cur_safety);
     gtk_stack_remove(GTK_STACK(stack), cur_sim);
+    gtk_stack_remove(GTK_STACK(stack), cur_whynot);
     process_pending_events();
 
-    /* Assert that their observers are unregistered (count drops from 4 to 2) */
+    /* Assert that their observers are unregistered (count drops from 5 to 2: dashboard and resources remain) */
     if (model->observer_count != 2) {
-        fprintf(stderr, "FAIL: Expected 2 active observers after removing safety & simulator, found %d.\n",
+        fprintf(stderr, "FAIL: Expected 2 active observers after removing dynamic pages, found %d.\n",
                 model->observer_count);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
@@ -1138,12 +1374,14 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     /* 2. Recreate the pages, verify observer registrations restored exactly once */
     GtkWidget *new_safety = gui_page_safety_create(model, win);
     GtkWidget *new_sim = gui_page_simulator_create(model, win);
+    GtkWidget *new_whynot = gui_page_whynot_create(model, win);
     gtk_stack_add_titled(GTK_STACK(stack), new_safety, "safety", "Safety Analysis");
     gtk_stack_add_titled(GTK_STACK(stack), new_sim, "simulator", "Request Simulator");
+    gtk_stack_add_titled(GTK_STACK(stack), new_whynot, "whynot", "Why-not Intelligence");
     process_pending_events();
 
-    if (model->observer_count != 4) {
-        fprintf(stderr, "FAIL: Expected 4 active observers after page recreation, found %d.\n",
+    if (model->observer_count != 5) {
+        fprintf(stderr, "FAIL: Expected 5 active observers after page recreation, found %d.\n",
                 model->observer_count);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);

@@ -11,8 +11,8 @@ THDR   = engine/threading.h
 # GUI module (GTK4 — Linux only)
 GTK_CFLAGS ?= $(shell pkg-config --cflags gtk4 2>/dev/null)
 GTK_LIBS   ?= $(shell pkg-config --libs gtk4 2>/dev/null)
-GUI_SRCS    = gui/main.c gui/app.c gui/window.c gui/pages.c gui/style.c gui/smoke.c gui/model.c gui/safety_view.c gui/request_view.c
-GUI_HDRS    = gui/app.h gui/window.h gui/pages.h gui/style.h gui/smoke.h gui/model.h gui/safety_view.h gui/request_view.h
+GUI_SRCS    = gui/main.c gui/app.c gui/window.c gui/pages.c gui/style.c gui/smoke.c gui/model.c gui/safety_view.c gui/request_view.c gui/whynot_view.c
+GUI_HDRS    = gui/app.h gui/window.h gui/pages.h gui/style.h gui/smoke.h gui/model.h gui/safety_view.h gui/request_view.h gui/whynot_view.h
 GUI_BIN     = resourceguard_gui
 
 all: banker_cli test_banker
