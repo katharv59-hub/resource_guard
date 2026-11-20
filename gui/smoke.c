@@ -827,8 +827,118 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
-    if (!gtk_widget_get_first_child(ww->box_blocked_procs)) {
-        fprintf(stderr, "FAIL: Blocked processes list is empty in denial trace.\n");
+    /* Strengthened denial trace assertions (Phase 3.1) */
+    /* 1. Step count and step content */
+    GtkWidget *step0 = gtk_widget_get_first_child(ww->box_trace_steps);
+    if (!step0) {
+        fprintf(stderr, "FAIL: Expected trace step 0 widget missing.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    GtkWidget *step0_badge = gtk_widget_get_first_child(step0);
+    GtkWidget *step0_desc = step0_badge ? gtk_widget_get_next_sibling(step0_badge) : NULL;
+    if (!step0_badge || !step0_desc) {
+        fprintf(stderr, "FAIL: Trace step 0 layout malformed.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *step0_title = gtk_label_get_text(GTK_LABEL(step0_badge));
+    if (strcmp(step0_title, "Step 0") != 0) {
+        fprintf(stderr, "FAIL: Expected 'Step 0' badge, got '%s'.\n", step0_title);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *step0_text = gtk_label_get_text(GTK_LABEL(step0_desc));
+    if (!strstr(step0_text, "ALGORITHMIC STALL DETECTED at Work [ 0, 0, 2 ]")) {
+        fprintf(stderr, "FAIL: Step 0 text did not display stall at Work [ 0, 0, 2 ] (got '%s').\n", step0_text);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_next_sibling(step0) != NULL) {
+        fprintf(stderr, "FAIL: Expected exactly 1 step in demo denial trace.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* 2. Blocked processes count, identities, exact Need and Deficit values */
+    const char *expected_proc_headers[5] = {
+        "Process P0 (Blocked / Unfinished)",
+        "Process P1 (Blocked / Unfinished)",
+        "Process P2 (Blocked / Unfinished)",
+        "Process P3 (Blocked / Unfinished)",
+        "Process P4 (Blocked / Unfinished)"
+    };
+    const char *expected_proc_needs[5] = {
+        "Need: [ 7, 4, 3 ]",
+        "Need: [ 1, 2, 2 ]",
+        "Need: [ 6, 0, 0 ]",
+        "Need: [ 0, 1, 1 ]",
+        "Need: [ 1, 0, 1 ]"
+    };
+    const char *expected_proc_deficits[5] = {
+        "Deficit: [ 7, 4, 1 ]",
+        "Deficit: [ 1, 2, 0 ]",
+        "Deficit: [ 6, 0, 0 ]",
+        "Deficit: [ 0, 1, 0 ]",
+        "Deficit: [ 1, 0, 0 ]"
+    };
+
+    GtkWidget *cur_proc_card = gtk_widget_get_first_child(ww->box_blocked_procs);
+    for (int p = 0; p < 5; p++) {
+        if (!cur_proc_card) {
+            fprintf(stderr, "FAIL: Expected blocked process card %d missing.\n", p);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+        GtkWidget *lbl_ph = gtk_widget_get_first_child(cur_proc_card);
+        GtkWidget *lbl_pd = lbl_ph ? gtk_widget_get_next_sibling(lbl_ph) : NULL;
+        if (!lbl_ph || !lbl_pd) {
+            fprintf(stderr, "FAIL: Blocked process card %d missing header or detail label.\n", p);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+        const char *ph_text = gtk_label_get_text(GTK_LABEL(lbl_ph));
+        const char *pd_text = gtk_label_get_text(GTK_LABEL(lbl_pd));
+
+        if (strcmp(ph_text, expected_proc_headers[p]) != 0) {
+            fprintf(stderr, "FAIL: Blocked process %d header mismatch: expected '%s', got '%s'.\n",
+                    p, expected_proc_headers[p], ph_text);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+        if (!strstr(pd_text, expected_proc_needs[p])) {
+            fprintf(stderr, "FAIL: Blocked process %d missing expected %s in '%s'.\n",
+                    p, expected_proc_needs[p], pd_text);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+        if (!strstr(pd_text, expected_proc_deficits[p])) {
+            fprintf(stderr, "FAIL: Blocked process %d missing expected %s in '%s'.\n",
+                    p, expected_proc_deficits[p], pd_text);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+        if (!strstr(pd_text, "Final Work: [ 0, 0, 2 ]")) {
+            fprintf(stderr, "FAIL: Blocked process %d missing Final Work: [ 0, 0, 2 ] in '%s'.\n",
+                    p, pd_text);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+        cur_proc_card = gtk_widget_get_next_sibling(cur_proc_card);
+    }
+    if (cur_proc_card != NULL) {
+        fprintf(stderr, "FAIL: Found more than 5 blocked processes in demo denial trace.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
@@ -870,6 +980,93 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
+
+    /* Test oversized-space UI handling (Phase 3.1) */
+    BankerState saved_state_before_over = model->current_state;
+    uint64_t saved_ver_before_over = model->state_version;
+
+    BankerState s_over;
+    banker_init(&s_over, 5, 3);
+    for (int j = 0; j < 3; j++) {
+        for (int i = 0; i < 5; i++) {
+            s_over.alloc[i][j] = 100;
+            s_over.max[i][j] = (i == 4) ? 250 : 110;
+        }
+        s_over.available[j] = 100;
+        s_over.total[j] = 500 + 100;
+    }
+    model->current_state = s_over;
+    model->draft_state = s_over;
+    model->state_version++;
+
+    int req_over[BANKER_MAX_RES] = {100, 100, 100};
+    RequestResult res_over = gui_model_submit_request(model, 4, req_over, NULL);
+    if (res_over != REQ_DENIED_UNSAFE) {
+        fprintf(stderr, "FAIL: Oversized request was not denied as REQ_DENIED_UNSAFE.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    /* Assert oversized status badge and banner */
+    const char *badge_over_txt = gtk_label_get_text(GTK_LABEL(ww->badge_status));
+    if (strcmp(badge_over_txt, "OVERSIZED SPACE") != 0) {
+        fprintf(stderr, "FAIL: Expected badge_status 'OVERSIZED SPACE', got '%s'.\n", badge_over_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_visible(ww->banner_oversized)) {
+        fprintf(stderr, "FAIL: Oversized banner not visible.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *over_lbl_txt = gtk_label_get_text(GTK_LABEL(ww->label_oversized));
+    if (!strstr(over_lbl_txt, "exceeds the exploration limit of 100,000 vectors")) {
+        fprintf(stderr, "FAIL: Oversized banner missing 100,000 disclaimer (got '%s').\n", over_lbl_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Assert cards are completely hidden */
+    if (gtk_widget_get_visible(ww->card_summary)) {
+        fprintf(stderr, "FAIL: Summary card visible during oversized space error.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_visible(ww->card_trace)) {
+        fprintf(stderr, "FAIL: Trace card visible during oversized space error.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_visible(ww->card_alternatives)) {
+        fprintf(stderr, "FAIL: Alternatives card visible during oversized space error.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_visible(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: Load simulator button visible during oversized space error.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Restore demo baseline and re-submit P4 request [3, 3, 0] to continue test suite */
+    model->current_state = saved_state_before_over;
+    model->draft_state = saved_state_before_over;
+    model->state_version = saved_ver_before_over;
+    int p4_restore_req[BANKER_MAX_RES] = {3, 3, 0};
+    gui_model_submit_request(model, 4, p4_restore_req, NULL);
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
 
     /* Uncommitted draft test: edit draft in Resources and navigate to Why-not */
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "resources");
@@ -1020,7 +1217,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
     char expected_cap_ver[64], expected_cur_ver[64];
-    snprintf(expected_cap_ver, sizeof(expected_cap_ver), "State v%lu", (unsigned long)ctx_after_nav.state_version);
+    snprintf(expected_cap_ver, sizeof(expected_cap_ver), "State v%lu", (unsigned long)why_ctx.state_version);
     snprintf(expected_cur_ver, sizeof(expected_cur_ver), "Current State is v%lu", (unsigned long)model->state_version);
     const char *stale_txt = gtk_label_get_text(GTK_LABEL(ww->label_stale));
     if (!strstr(stale_txt, "Historical Diagnostic") || !strstr(stale_txt, expected_cap_ver) || !strstr(stale_txt, expected_cur_ver)) {
@@ -1030,13 +1227,294 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Test Re-evaluate Against Current State:
-     * Current state has available R0 = 2, so P0's rejected request of [0, 3, 0] or P4 [3, 3, 0] can be tested. */
+    /* Phase 3.1: Stale nearest-safe alternative handling */
+    if (gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator is sensitive while why_not context is stale.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *nearest_lbl_stale = gtk_label_get_text(GTK_LABEL(ww->label_alt_nearest));
+    if (!strstr(nearest_lbl_stale, "Historical — Not guaranteed safe in current state")) {
+        fprintf(stderr, "FAIL: label_alt_nearest missing historical warning (got '%s').\n", nearest_lbl_stale);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *load_status_stale = gtk_label_get_text(GTK_LABEL(ww->label_load_status));
+    if (!strstr(load_status_stale, "Loading disabled: Vector belongs to historical snapshot")) {
+        fprintf(stderr, "FAIL: label_load_status missing historical explanation (got '%s').\n", load_status_stale);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    /* Clicking btn_load_simulator while stale must do nothing */
+    g_signal_emit_by_name(ww->btn_load_simulator, "clicked");
+    process_pending_events();
+    if (strcmp(gtk_stack_get_visible_child_name(GTK_STACK(stack)), "whynot") != 0) {
+        fprintf(stderr, "FAIL: btn_load_simulator navigated away while stale.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Phase 3.1: Test Re-evaluation Assertion 1: WHY_ERR_BAD_STATE (dirty uncommitted draft) */
+    gui_model_set_draft_available(model, 0, 99);
+    GuiWhyNotContext ctx_before_bad;
+    gui_model_get_why_not_context(model, &ctx_before_bad);
+    g_signal_emit_by_name(ww->btn_reevaluate, "clicked");
+    process_pending_events();
+    const char *bad_txt = gtk_label_get_text(GTK_LABEL(ww->label_reeval_status));
+    if (!strstr(bad_txt, "uncommitted draft")) {
+        fprintf(stderr, "FAIL: Re-evaluation did not report uncommitted draft error (got '%s').\n", bad_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    GuiWhyNotContext ctx_after_bad;
+    gui_model_get_why_not_context(model, &ctx_after_bad);
+    if (memcmp(&ctx_before_bad, &ctx_after_bad, sizeof(GuiWhyNotContext)) != 0) {
+        fprintf(stderr, "FAIL: WhyNotContext corrupted by WHY_ERR_BAD_STATE re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator became sensitive after WHY_ERR_BAD_STATE.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    gui_model_init_draft_from_current(model);
+
+    /* Phase 3.1: Test Re-evaluation Assertion 2: WHY_OK (request remains unsafe) */
     g_signal_emit_by_name(ww->btn_reevaluate, "clicked");
     process_pending_events();
     const char *reeval_txt = gtk_label_get_text(GTK_LABEL(ww->label_reeval_status));
-    if (!strstr(reeval_txt, "Re-evaluation")) {
-        fprintf(stderr, "FAIL: Re-evaluation status label did not report outcome (got '%s').\n", reeval_txt);
+    if (!strstr(reeval_txt, "request remains unsafe")) {
+        fprintf(stderr, "FAIL: Expected 'request remains unsafe', got '%s'.\n", reeval_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gui_model_is_why_not_stale(model)) {
+        fprintf(stderr, "FAIL: Model still reports stale after successful WHY_OK re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_visible(ww->banner_stale)) {
+        fprintf(stderr, "FAIL: Stale banner remains visible after WHY_OK re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator not sensitive after WHY_OK re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Test Load Nearest Safe Alternative into Simulator (never auto-submits) */
+    uint64_t ver_before_load = model->state_version;
+    const char *badge_res_before = gtk_label_get_text(GTK_LABEL(rw->badge_result_code));
+    g_signal_emit_by_name(ww->btn_load_simulator, "clicked");
+    process_pending_events();
+
+    if (strcmp(gtk_stack_get_visible_child_name(GTK_STACK(stack)), "simulator") != 0) {
+        fprintf(stderr, "FAIL: btn_load_simulator did not switch page to simulator.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_drop_down_get_selected(GTK_DROP_DOWN(rw->dropdown_proc)) != (guint)model->why_context.pid) {
+        fprintf(stderr, "FAIL: Simulator selected PID mismatch after load.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    for (int j = 0; j < model->current_state.m; j++) {
+        int loaded_val = (int)gtk_spin_button_get_value(GTK_SPIN_BUTTON(rw->spin_req[j]));
+        if (loaded_val != model->why_context.report.nearest_safe_request[j]) {
+            fprintf(stderr, "FAIL: Spin button %d loaded %d != nearest safe %d.\n",
+                    j, loaded_val, model->why_context.report.nearest_safe_request[j]);
+            gtk_window_destroy(GTK_WINDOW(win));
+            g_object_unref(app);
+            return 1;
+        }
+    }
+    /* Verify request was not automatically submitted */
+    if (model->state_version != ver_before_load) {
+        fprintf(stderr, "FAIL: State version incremented on load (request was auto-submitted!).\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (strcmp(gtk_label_get_text(GTK_LABEL(rw->badge_result_code)), badge_res_before) != 0) {
+        fprintf(stderr, "FAIL: Result badge changed on load (request was auto-submitted!).\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Phase 3.1: Test Re-evaluation Assertion 3: WHY_ERR_UNAVAILABLE */
+    /* Reduce Available R1 so that P0's rejected request of 3 exceeds current Available */
+    gui_model_set_draft_total(model, 1, model->draft_state.total[1] - 2);
+    gui_model_set_draft_available(model, 1, model->draft_state.available[1] - 2);
+    if (!gui_model_commit_draft(model)) {
+        fprintf(stderr, "FAIL: Failed to commit draft reducing Available R1.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    GuiWhyNotContext ctx_before_unavail;
+    gui_model_get_why_not_context(model, &ctx_before_unavail);
+
+    g_signal_emit_by_name(ww->btn_reevaluate, "clicked");
+    process_pending_events();
+
+    const char *unavail_txt = gtk_label_get_text(GTK_LABEL(ww->label_reeval_status));
+    if (!strstr(unavail_txt, "exceeds Available resources (REQ_WAIT_UNAVAILABLE)")) {
+        fprintf(stderr, "FAIL: Expected unavailable status, got '%s'.\n", unavail_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    GuiWhyNotContext ctx_after_unavail;
+    gui_model_get_why_not_context(model, &ctx_after_unavail);
+    if (memcmp(&ctx_before_unavail, &ctx_after_unavail, sizeof(GuiWhyNotContext)) != 0) {
+        fprintf(stderr, "FAIL: WhyNotContext corrupted by WHY_ERR_UNAVAILABLE re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator sensitive after WHY_ERR_UNAVAILABLE re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Phase 3.1: Test Re-evaluation Assertion 4: WHY_ERR_EXCEEDS_NEED */
+    /* Set P0 Max R1 = 2 (Alloc=1 => Need=1 < request=3) with high available */
+    gui_model_set_draft_max(model, 0, 1, 2);
+    gui_model_set_draft_total(model, 1, 15);
+    gui_model_set_draft_available(model, 1, 8);
+    if (!gui_model_commit_draft(model)) {
+        fprintf(stderr, "FAIL: Failed to commit draft for WHY_ERR_EXCEEDS_NEED.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    GuiWhyNotContext ctx_before_need;
+    gui_model_get_why_not_context(model, &ctx_before_need);
+
+    g_signal_emit_by_name(ww->btn_reevaluate, "clicked");
+    process_pending_events();
+
+    const char *exceed_need_txt = gtk_label_get_text(GTK_LABEL(ww->label_reeval_status));
+    if (!strstr(exceed_need_txt, "exceeds the process's remaining Need (REQ_ERR_EXCEEDS_NEED)")) {
+        fprintf(stderr, "FAIL: Expected exceeds need status, got '%s'.\n", exceed_need_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    GuiWhyNotContext ctx_after_need;
+    gui_model_get_why_not_context(model, &ctx_after_need);
+    if (memcmp(&ctx_before_need, &ctx_after_need, sizeof(GuiWhyNotContext)) != 0) {
+        fprintf(stderr, "FAIL: WhyNotContext corrupted by WHY_ERR_EXCEEDS_NEED re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator sensitive after WHY_ERR_EXCEEDS_NEED re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Phase 3.1: Test Re-evaluation Assertion 5: WHY_ERR_NOT_UNSAFE */
+    /* Restore P0 Max R1 to 4 and provide plenty of resources so request is safe */
+    gui_model_set_draft_max(model, 0, 1, 4);
+    for (int j = 0; j < model->draft_state.m; j++) {
+        gui_model_set_draft_total(model, j, model->draft_state.total[j] + 50);
+        gui_model_set_draft_available(model, j, model->draft_state.available[j] + 50);
+    }
+    if (!gui_model_commit_draft(model)) {
+        fprintf(stderr, "FAIL: Failed to commit generous resources for WHY_ERR_NOT_UNSAFE.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    GuiWhyNotContext ctx_before_safe;
+    gui_model_get_why_not_context(model, &ctx_before_safe);
+
+    g_signal_emit_by_name(ww->btn_reevaluate, "clicked");
+    process_pending_events();
+
+    const char *safe_txt = gtk_label_get_text(GTK_LABEL(ww->label_reeval_status));
+    if (!strstr(safe_txt, "this request is now SAFE! It would be granted immediately")) {
+        fprintf(stderr, "FAIL: Expected now safe status, got '%s'.\n", safe_txt);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    GuiWhyNotContext ctx_after_safe;
+    gui_model_get_why_not_context(model, &ctx_after_safe);
+    if (memcmp(&ctx_before_safe, &ctx_after_safe, sizeof(GuiWhyNotContext)) != 0) {
+        fprintf(stderr, "FAIL: WhyNotContext corrupted by WHY_ERR_NOT_UNSAFE re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator sensitive after WHY_ERR_NOT_UNSAFE re-evaluation.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Phase 3.1: Dimensional Mismatch Handling */
+    gui_model_set_draft_dimensions(model, model->draft_state.n, 2);
+    gui_model_auto_calculate_draft_available(model);
+    if (!gui_model_commit_draft(model)) {
+        fprintf(stderr, "FAIL: Failed to commit dimension reduction to 2.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
+    if (gtk_widget_get_sensitive(ww->btn_load_simulator)) {
+        fprintf(stderr, "FAIL: btn_load_simulator sensitive during dimensional mismatch.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *dim_status = gtk_label_get_text(GTK_LABEL(ww->label_load_status));
+    if (!strstr(dim_status, "Dimensional mismatch")) {
+        fprintf(stderr, "FAIL: label_load_status missing 'Dimensional mismatch' (got '%s').\n", dim_status);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    /* Clicking btn_load_simulator during dimensional mismatch must safely do nothing */
+    g_signal_emit_by_name(ww->btn_load_simulator, "clicked");
+    process_pending_events();
+    if (strcmp(gtk_stack_get_visible_child_name(GTK_STACK(stack)), "whynot") != 0) {
+        fprintf(stderr, "FAIL: btn_load_simulator switched page during dimensional mismatch.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;

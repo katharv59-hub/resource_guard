@@ -341,20 +341,62 @@ static void whynot_refresh(WhynotWidgets *w) {
     }
 
     /* 5. Card 3: Actionable Safe Alternatives */
+    bool dim_mismatch = (ctx.snapshot_state.n != w->model->current_state.n ||
+                         ctx.snapshot_state.m != w->model->current_state.m);
+
     if (ctx.report.has_nearest_safe_request) {
         char near_str[128];
         format_vec(ctx.report.nearest_safe_request, ctx.snapshot_state.m, near_str, sizeof(near_str));
-        snprintf(buf, sizeof(buf), "Nearest Safe Alternative Vector: %s", near_str);
-        gtk_label_set_text(GTK_LABEL(w->label_alt_nearest), buf);
 
-        snprintf(buf, sizeof(buf), "Manhattan Distance (L1): %llu units", ctx.report.nearest_distance);
-        gtk_label_set_text(GTK_LABEL(w->label_alt_distance), buf);
+        if (is_stale) {
+            snprintf(buf, sizeof(buf),
+                     "Nearest Safe Alternative (Snapshot v%lu): %s [Historical — Not guaranteed safe in current state v%lu]",
+                     (unsigned long)ctx.state_version, near_str, (unsigned long)w->model->state_version);
+            gtk_label_set_text(GTK_LABEL(w->label_alt_nearest), buf);
 
-        gtk_widget_set_sensitive(w->btn_load_simulator, TRUE);
+            snprintf(buf, sizeof(buf),
+                     "Manhattan Distance (L1): %llu units (evaluated at Snapshot v%lu)",
+                     ctx.report.nearest_distance, (unsigned long)ctx.state_version);
+            gtk_label_set_text(GTK_LABEL(w->label_alt_distance), buf);
+
+            gtk_widget_set_sensitive(w->btn_load_simulator, FALSE);
+
+            if (dim_mismatch) {
+                snprintf(buf, sizeof(buf),
+                         "Loading disabled: Dimensional mismatch between historical snapshot (%dp x %dr) and current state (%dp x %dr). Re-evaluate to update.",
+                         ctx.snapshot_state.n, ctx.snapshot_state.m,
+                         w->model->current_state.n, w->model->current_state.m);
+            } else {
+                snprintf(buf, sizeof(buf),
+                         "Loading disabled: Vector belongs to historical snapshot v%lu. Re-evaluate against current state (v%lu) to test and update.",
+                         (unsigned long)ctx.state_version, (unsigned long)w->model->state_version);
+            }
+            gtk_label_set_text(GTK_LABEL(w->label_load_status), buf);
+        } else if (dim_mismatch) {
+            snprintf(buf, sizeof(buf), "Nearest Safe Alternative Vector: %s", near_str);
+            gtk_label_set_text(GTK_LABEL(w->label_alt_nearest), buf);
+
+            snprintf(buf, sizeof(buf), "Manhattan Distance (L1): %llu units", ctx.report.nearest_distance);
+            gtk_label_set_text(GTK_LABEL(w->label_alt_distance), buf);
+
+            gtk_widget_set_sensitive(w->btn_load_simulator, FALSE);
+            gtk_label_set_text(GTK_LABEL(w->label_load_status),
+                               "Loading disabled: Dimensional mismatch between snapshot and current state.");
+        } else {
+            snprintf(buf, sizeof(buf), "Nearest Safe Alternative Vector: %s", near_str);
+            gtk_label_set_text(GTK_LABEL(w->label_alt_nearest), buf);
+
+            snprintf(buf, sizeof(buf), "Manhattan Distance (L1): %llu units", ctx.report.nearest_distance);
+            gtk_label_set_text(GTK_LABEL(w->label_alt_distance), buf);
+
+            gtk_widget_set_sensitive(w->btn_load_simulator, TRUE);
+            gtk_label_set_text(GTK_LABEL(w->label_load_status), "");
+        }
     } else {
         gtk_label_set_text(GTK_LABEL(w->label_alt_nearest), "Nearest Safe Alternative: None in bounded region");
         gtk_label_set_text(GTK_LABEL(w->label_alt_distance), "Manhattan Distance (L1): N/A");
         gtk_widget_set_sensitive(w->btn_load_simulator, FALSE);
+        gtk_label_set_text(GTK_LABEL(w->label_load_status), "");
     }
 
     char comp_summary[256];
@@ -371,8 +413,18 @@ static void on_btn_load_simulator_clicked(GtkWidget *btn, gpointer user_data) {
     WhynotWidgets *w = (WhynotWidgets *)user_data;
     if (!w || !w->model || !w->window) return;
 
+    /* Do not load if diagnostic is historical / stale */
+    if (gui_model_is_why_not_stale(w->model)) return;
+
     GuiWhyNotContext ctx;
     if (!gui_model_get_why_not_context(w->model, &ctx) || !ctx.report.has_nearest_safe_request) {
+        return;
+    }
+
+    /* Safe guard against process/resource dimension changes */
+    if (ctx.snapshot_state.n != w->model->current_state.n ||
+        ctx.snapshot_state.m != w->model->current_state.m ||
+        ctx.pid < 0 || ctx.pid >= w->model->current_state.n) {
         return;
     }
 
