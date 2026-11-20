@@ -1052,7 +1052,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
-    if (gtk_widget_get_visible(ww->btn_load_simulator)) {
+    if (gtk_widget_get_visible(ww->btn_load_simulator) || gtk_widget_is_visible(ww->btn_load_simulator)) {
         fprintf(stderr, "FAIL: Load simulator button visible during oversized space error.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);

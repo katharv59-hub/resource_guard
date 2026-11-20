@@ -197,6 +197,8 @@ static void whynot_refresh(WhynotWidgets *w) {
         gtk_widget_set_visible(w->card_summary, FALSE);
         gtk_widget_set_visible(w->card_trace, FALSE);
         gtk_widget_set_visible(w->card_alternatives, FALSE);
+        gtk_widget_set_visible(w->btn_load_simulator, FALSE);
+        gtk_widget_set_sensitive(w->btn_load_simulator, FALSE);
         return;
     }
 
@@ -204,6 +206,7 @@ static void whynot_refresh(WhynotWidgets *w) {
     gtk_widget_set_visible(w->card_summary, TRUE);
     gtk_widget_set_visible(w->card_trace, TRUE);
     gtk_widget_set_visible(w->card_alternatives, TRUE);
+    gtk_widget_set_visible(w->btn_load_simulator, TRUE);
 
     /* 3. Card 1: Diagnostic Exploration Summary */
     snprintf(buf, sizeof(buf), "%llu", ctx.report.candidate_count);
