@@ -603,6 +603,67 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Capture rejection context, committed BankerState, and state version */
+    GuiWhyNotContext ctx_before_zero = why_ctx;
+    BankerState state_before_zero = model->current_state;
+    uint64_t v_before_zero_sub = model->state_version;
+
+    /* Submit all-zero request through the actual Simulator Submit button */
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[0]), 0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[1]), 0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[2]), 0);
+
+    g_signal_emit_by_name(rw->btn_submit, "clicked");
+    process_pending_events();
+
+    /* Verify displayed result is REQ_GRANTED (NO-OP) */
+    const char *badge_zero_noop = gtk_label_get_text(GTK_LABEL(rw->badge_result_code));
+    if (strcmp(badge_zero_noop, "REQ_GRANTED (NO-OP)") != 0) {
+        fprintf(stderr, "FAIL: Expected 'REQ_GRANTED (NO-OP)' for zero request, got '%s'.\n", badge_zero_noop);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify previous rejection context remains unchanged */
+    GuiWhyNotContext ctx_after_zero;
+    if (!gui_model_get_why_not_context(model, &ctx_after_zero)) {
+        fprintf(stderr, "FAIL: Why-not context lost after zero request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (ctx_after_zero.pid != ctx_before_zero.pid ||
+        memcmp(ctx_after_zero.request, ctx_before_zero.request, sizeof(int) * model->current_state.m) != 0 ||
+        memcmp(&ctx_after_zero.snapshot_state, &ctx_before_zero.snapshot_state, sizeof(BankerState)) != 0 ||
+        ctx_after_zero.state_version != ctx_before_zero.state_version) {
+        fprintf(stderr, "FAIL: Previous rejection context modified by zero request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify committed BankerState and current state version did not change */
+    if (memcmp(&model->current_state, &state_before_zero, sizeof(BankerState)) != 0 ||
+        model->state_version != v_before_zero_sub) {
+        fprintf(stderr, "FAIL: Committed state or version modified by zero-request no-op.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Verify Explain Rejection button remains visible */
+    if (!gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button hidden after zero request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Navigation state immutability check: capture state before clicking */
+    BankerState state_before_nav = model->current_state;
+    uint64_t v_before_nav = model->state_version;
+
     /* Click Explain Rejection button and verify navigation to 'whynot' stack page */
     g_signal_emit_by_name(rw->btn_explain_rejection, "clicked");
     process_pending_events();
@@ -611,6 +672,33 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     if (!cur_page || strcmp(cur_page, "whynot") != 0) {
         fprintf(stderr, "FAIL: Explain Rejection button did not navigate to 'whynot' page (got '%s').\n",
                 cur_page ? cur_page : "<null>");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Assert committed BankerState and state_version byte-for-byte unchanged after navigation */
+    if (memcmp(&model->current_state, &state_before_nav, sizeof(BankerState)) != 0) {
+        fprintf(stderr, "FAIL: Navigation to 'whynot' modified committed BankerState!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (model->state_version != v_before_nav) {
+        fprintf(stderr, "FAIL: Navigation to 'whynot' modified state_version!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Assert rejection context remains intact after navigation */
+    GuiWhyNotContext ctx_after_nav;
+    if (!gui_model_get_why_not_context(model, &ctx_after_nav) ||
+        ctx_after_nav.pid != ctx_before_zero.pid ||
+        memcmp(ctx_after_nav.request, ctx_before_zero.request, sizeof(int) * model->current_state.m) != 0 ||
+        memcmp(&ctx_after_nav.snapshot_state, &ctx_before_zero.snapshot_state, sizeof(BankerState)) != 0 ||
+        ctx_after_nav.state_version != ctx_before_zero.state_version) {
+        fprintf(stderr, "FAIL: Rejection context altered by navigation!\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
