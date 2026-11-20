@@ -1151,6 +1151,263 @@ static void test_zero_request_on_unsafe_state_preserves_unsafe(void) {
     fflush(stdout);
 }
 
+static void test_why_not_rejection_capture_and_immutability(void) {
+    printf("[TEST 26/31] Why-not rejection capture on REQ_DENIED_UNSAFE and snapshot immutability...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_load_demo(&m);
+
+    /* Initially, no rejection is recorded */
+    assert(!gui_model_has_why_not(&m));
+    GuiWhyNotContext ctx;
+    assert(!gui_model_get_why_not_context(&m, &ctx));
+
+    /* Submit unsafe request: P4 requesting [3, 3, 0] */
+    int req[BANKER_MAX_RES] = {3, 3, 0};
+    Trace trace;
+    RequestResult res = gui_model_submit_request(&m, 4, req, &trace);
+    assert(res == REQ_DENIED_UNSAFE);
+
+    /* Model must now have Why-not context */
+    assert(gui_model_has_why_not(&m));
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.has_rejected_request);
+    assert(ctx.pid == 4);
+    assert(ctx.request[0] == 3 && ctx.request[1] == 3 && ctx.request[2] == 0);
+    assert(ctx.state_version == 1);
+    assert(!ctx.analyzed);
+    assert(ctx.status == WHY_OK);
+
+    /* Snapshot state must match current state byte-for-byte */
+    assert(memcmp(&ctx.snapshot_state, &m.current_state, sizeof(BankerState)) == 0);
+
+    /* Execute analysis */
+    WhyNotStatus st = gui_model_run_why_not(&m, NULL, NULL);
+    assert(st == WHY_OK);
+
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.analyzed);
+    assert(ctx.status == WHY_OK);
+    assert(ctx.report.candidate_count == 32);
+    assert(ctx.report.safe_count == 24);
+    assert(ctx.report.unsafe_count == 8);
+    assert(ctx.report.has_safe_request);
+    assert(ctx.report.has_nearest_safe_request);
+    assert(ctx.report.nearest_distance == 1);
+    assert(ctx.report.nearest_safe_request[0] == 3 &&
+           ctx.report.nearest_safe_request[1] == 2 &&
+           ctx.report.nearest_safe_request[2] == 0);
+    assert(ctx.report.componentwise_max_is_safe);
+    assert(ctx.report.componentwise_max[0] == 3 &&
+           ctx.report.componentwise_max[1] == 2 &&
+           ctx.report.componentwise_max[2] == 1);
+    assert(!ctx.report.denial_trace.safe);
+    assert(ctx.report.denial_trace.final_work[0] == 0 &&
+           ctx.report.denial_trace.final_work[1] == 0 &&
+           ctx.report.denial_trace.final_work[2] == 2);
+
+    /* Immutability check: mutate m.draft_state; snapshot in context must NOT change */
+    m.draft_state.available[0] = 999;
+    assert(ctx.snapshot_state.available[0] == 3);
+
+    printf("  -> Passed (exact PID, vector, snapshot, trace, and alternatives verified).\n");
+    fflush(stdout);
+}
+
+static void test_why_not_state_version_tracking_and_staleness(void) {
+    printf("[TEST 27/31] Why-not state-version tracking and staleness detection...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_load_demo(&m);
+
+    /* Record rejection at state_version = 1 */
+    int req[BANKER_MAX_RES] = {3, 3, 0};
+    RequestResult res = gui_model_submit_request(&m, 4, req, NULL);
+    assert(res == REQ_DENIED_UNSAFE);
+
+    assert(!gui_model_is_why_not_stale(&m));
+
+    /* Submit a safe request for P1: [1, 0, 2] -> granted, advances state_version to 2 */
+    int safe_req[BANKER_MAX_RES] = {1, 0, 2};
+    res = gui_model_submit_request(&m, 1, safe_req, NULL);
+    assert(res == REQ_GRANTED);
+    assert(m.state_version == 2);
+
+    /* Diagnostic must now be reported as stale/historical */
+    assert(gui_model_is_why_not_stale(&m));
+
+    GuiWhyNotContext ctx;
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.state_version == 1);
+    assert(m.state_version == 2);
+
+    printf("  -> Passed (staleness accurately flags historical diagnostic after state changes).\n");
+    fflush(stdout);
+}
+
+static void test_why_not_replacement_on_new_rejection(void) {
+    printf("[TEST 28/31] Why-not replacement on new unsafe rejection vs wait-unavailable...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_load_demo(&m);
+
+    /* Initial rejection: P4 requesting [3, 3, 0] */
+    int req_p4[BANKER_MAX_RES] = {3, 3, 0};
+    assert(gui_model_submit_request(&m, 4, req_p4, NULL) == REQ_DENIED_UNSAFE);
+
+    GuiWhyNotContext ctx;
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.pid == 4);
+    assert(ctx.request[0] == 3 && ctx.request[1] == 3 && ctx.request[2] == 0);
+
+    /* Second rejection: P0 requesting [0, 3, 0] (Need is [7,4,3], Avail is [3,3,2]; trial avail is [3,0,2] -> unsafe) */
+    int req_p0[BANKER_MAX_RES] = {0, 3, 0};
+    assert(gui_model_submit_request(&m, 0, req_p0, NULL) == REQ_DENIED_UNSAFE);
+
+    /* Context must now reflect P0's rejection, replacing P4 */
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.pid == 0);
+    assert(ctx.request[0] == 0 && ctx.request[1] == 3 && ctx.request[2] == 0);
+    assert(!ctx.analyzed);
+
+    /* Submitting an unavailable request (within Need, but exceeds Available) must NOT replace or clear why_context */
+    /* P0 Need is [7, 4, 3], Available is [3, 3, 2]. Request [4, 0, 0] <= Need, but > Available */
+    int req_unavail[BANKER_MAX_RES] = {4, 0, 0};
+    assert(gui_model_submit_request(&m, 0, req_unavail, NULL) == REQ_WAIT_UNAVAILABLE);
+
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.pid == 0);
+    assert(ctx.request[0] == 0 && ctx.request[1] == 3 && ctx.request[2] == 0);
+
+    printf("  -> Passed (new unsafe rejection atomically replaces context; unavailable request preserves it).\n");
+    fflush(stdout);
+}
+
+static void test_why_not_lifecycle_clearing(void) {
+    printf("[TEST 29/31] Why-not lifecycle clearing on reset and scenario load...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_load_demo(&m);
+
+    int req[BANKER_MAX_RES] = {3, 3, 0};
+    assert(gui_model_submit_request(&m, 4, req, NULL) == REQ_DENIED_UNSAFE);
+    assert(gui_model_has_why_not(&m));
+
+    /* Reset to original baseline clears why_not context */
+    assert(gui_model_reset_to_original(&m));
+    assert(!gui_model_has_why_not(&m));
+
+    /* Re-trigger rejection */
+    assert(gui_model_submit_request(&m, 4, req, NULL) == REQ_DENIED_UNSAFE);
+    assert(gui_model_has_why_not(&m));
+
+    /* Loading a scenario clears why_not context */
+    char err[256];
+    assert(gui_model_load_scenario(&m, "tests/scenarios/demo.txt", err, sizeof(err)));
+    assert(!gui_model_has_why_not(&m));
+
+    printf("  -> Passed (why_not context safely cleared on reset and scenario load).\n");
+    fflush(stdout);
+}
+
+static void test_why_not_reevaluate_semantics(void) {
+    printf("[TEST 30/31] Why-not re-evaluate semantics across state changes (unsafe -> unavail -> safe)...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+    gui_model_load_demo(&m);
+
+    /* P4 requests [3, 3, 0] -> rejected at v=1 */
+    int req[BANKER_MAX_RES] = {3, 3, 0};
+    assert(gui_model_submit_request(&m, 4, req, NULL) == REQ_DENIED_UNSAFE);
+
+    /* 1. Re-evaluate against same state -> returns WHY_OK */
+    WhyNotReport rep;
+    assert(gui_model_reevaluate_why_not(&m, &rep) == WHY_OK);
+    assert(rep.candidate_count == 32);
+
+    /* 2. Grant request to P1: [1, 0, 2] -> available drops to [2, 3, 0] */
+    int req_p1[BANKER_MAX_RES] = {1, 0, 2};
+    assert(gui_model_submit_request(&m, 1, req_p1, NULL) == REQ_GRANTED);
+
+    /* Now P4's request of [3, 3, 0] exceeds available R0 (3 > 2) */
+    assert(gui_model_reevaluate_why_not(&m, &rep) == WHY_ERR_UNAVAILABLE);
+
+    /* 3. Increase available capacity in draft and commit so that [3, 3, 0] is safe */
+    gui_model_reset_to_original(&m);
+    assert(gui_model_submit_request(&m, 4, req, NULL) == REQ_DENIED_UNSAFE);
+
+    /* Modify draft to give plenty of available resources */
+    for (int j = 0; j < m.current_state.m; j++) {
+        gui_model_set_draft_total(&m, j, m.current_state.total[j] + 20);
+        gui_model_set_draft_available(&m, j, m.current_state.available[j] + 20);
+    }
+    assert(gui_model_commit_draft(&m));
+
+    /* Re-evaluate: [3, 3, 0] should now be safe (WHY_ERR_NOT_UNSAFE) */
+    assert(gui_model_reevaluate_why_not(&m, &rep) == WHY_ERR_NOT_UNSAFE);
+
+    printf("  -> Passed (re-evaluation properly detects WHY_OK, WHY_ERR_UNAVAILABLE, and WHY_ERR_NOT_UNSAFE).\n");
+    fflush(stdout);
+}
+
+static void test_why_not_oversized_search_space_rejection(void) {
+    printf("[TEST 31/31] Why-not oversized search space (> 100,000) pre-check and zero partial analysis...\n");
+    fflush(stdout);
+
+    GuiModel m;
+    gui_model_init(&m);
+
+    /* Build a state with oversized search space */
+    BankerState s;
+    banker_init(&s, 5, 3);
+    for (int j = 0; j < 3; j++) {
+        for (int i = 0; i < 5; i++) {
+            s.alloc[i][j] = 100;
+            s.max[i][j] = (i == 4) ? 250 : 110;
+        }
+        s.available[j] = 100;
+        s.total[j] = 500 + 100;
+    }
+    assert(banker_validate(&s, NULL, NULL) == BANKER_OK);
+
+    m.current_state = s;
+    m.original_state = s;
+    m.draft_state = s;
+    m.is_loaded = true;
+    m.state_version = 1;
+
+    /* P4 requests [100, 100, 100]:
+     * Need is [150, 150, 150], Avail is [100, 100, 100].
+     * Bounds are min(150, 100) = [100, 100, 100].
+     * Candidates = 101 * 101 * 101 = 1,030,301 > 100,000 cap!
+     * Trial available is [0, 0, 0], and P4 remaining need is [50, 50, 50] > 0.
+     * No process can finish -> REQ_DENIED_UNSAFE! */
+    int req[BANKER_MAX_RES] = {100, 100, 100};
+    assert(gui_model_submit_request(&m, 4, req, NULL) == REQ_DENIED_UNSAFE);
+
+    /* Run analysis: must immediately abort with WHY_ERR_SEARCH_SPACE_TOO_LARGE */
+    WhyNotStatus st = gui_model_run_why_not(&m, NULL, NULL);
+    assert(st == WHY_ERR_SEARCH_SPACE_TOO_LARGE);
+
+    GuiWhyNotContext ctx;
+    assert(gui_model_get_why_not_context(&m, &ctx));
+    assert(ctx.status == WHY_ERR_SEARCH_SPACE_TOO_LARGE);
+    assert(ctx.report.candidate_count == 0); /* Zero partial analysis */
+
+    printf("  -> Passed (oversized space >100,000 cleanly aborted with zero visited candidates).\n");
+    fflush(stdout);
+}
+
 int main(void) {
     printf("\n============================================================\n");
     printf(" RESOURCEGUARD GUI MODEL & APPLICATION CONTROLLER TESTS\n");
@@ -1182,9 +1439,15 @@ int main(void) {
     test_observer_removal_independence();
     test_observer_notification_modification_safety();
     test_zero_request_on_unsafe_state_preserves_unsafe();
+    test_why_not_rejection_capture_and_immutability();
+    test_why_not_state_version_tracking_and_staleness();
+    test_why_not_replacement_on_new_rejection();
+    test_why_not_lifecycle_clearing();
+    test_why_not_reevaluate_semantics();
+    test_why_not_oversized_search_space_rejection();
 
     printf("\n============================================================\n");
-    printf(" ALL 25 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
+    printf(" ALL 31 APPLICATION MODEL TESTS PASSED SUCCESSFULLY!\n");
     printf("============================================================\n\n");
     fflush(stdout);
     return 0;

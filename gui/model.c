@@ -379,6 +379,7 @@ bool gui_model_load_scenario(GuiModel *m, const char *path, char *err_buf, size_
     snprintf(m->scenario_path, sizeof(m->scenario_path), "%s", path);
     extract_basename(path, m->scenario_name, sizeof(m->scenario_name));
 
+    gui_model_clear_why_not(m);
     gui_model_validate_draft(m);
     notify_change(m);
     return true;
@@ -389,6 +390,7 @@ bool gui_model_reset_to_original(GuiModel *m) {
     m->current_state = m->original_state;
     m->draft_state = m->original_state;
     m->state_version++;
+    gui_model_clear_why_not(m);
     gui_model_validate_draft(m);
     notify_change(m);
     return true;
@@ -622,9 +624,77 @@ RequestResult gui_model_submit_request(GuiModel *m, int pid, const int req[], Tr
             gui_model_validate_draft(m);
             notify_change(m);       /* notify observers of committed state change */
         }
+    } else if (res == REQ_DENIED_UNSAFE) {
+        /* Atomically capture rejection context */
+        m->why_context.has_rejected_request = true;
+        m->why_context.pid = pid;
+        for (int j = 0; j < m->current_state.m; j++) {
+            m->why_context.request[j] = req[j];
+        }
+        m->why_context.snapshot_state = m->current_state; /* immutable snapshot at rejection */
+        m->why_context.state_version = m->state_version;
+        m->why_context.analyzed = false;
+        m->why_context.status = WHY_OK;
+        memset(&m->why_context.report, 0, sizeof(m->why_context.report));
     }
 
     return res;
+}
+
+void gui_model_clear_why_not(GuiModel *m) {
+    if (!m) return;
+    memset(&m->why_context, 0, sizeof(m->why_context));
+}
+
+bool gui_model_has_why_not(const GuiModel *m) {
+    if (!m) return false;
+    return m->why_context.has_rejected_request;
+}
+
+bool gui_model_get_why_not_context(const GuiModel *m, GuiWhyNotContext *out) {
+    if (!m || !out || !m->why_context.has_rejected_request) return false;
+    *out = m->why_context;
+    return true;
+}
+
+bool gui_model_is_why_not_stale(const GuiModel *m) {
+    if (!m || !m->why_context.has_rejected_request) return false;
+    return (m->why_context.state_version < m->state_version);
+}
+
+WhyNotStatus gui_model_run_why_not(GuiModel *m, BankerWhyVisitor visitor, void *user_data) {
+    if (!m || !m->is_loaded || !m->why_context.has_rejected_request) {
+        return WHY_ERR_BAD_STATE;
+    }
+
+    WhyNotStatus st = banker_why_not(&m->why_context.snapshot_state,
+                                     m->why_context.pid,
+                                     m->why_context.request,
+                                     &m->why_context.report,
+                                     visitor,
+                                     user_data);
+    m->why_context.status = st;
+    m->why_context.analyzed = true;
+    return st;
+}
+
+WhyNotStatus gui_model_reevaluate_why_not(GuiModel *m, WhyNotReport *out_report) {
+    if (!m || !m->is_loaded || !m->why_context.has_rejected_request) {
+        return WHY_ERR_BAD_STATE;
+    }
+
+    WhyNotReport rep;
+    memset(&rep, 0, sizeof(rep));
+    WhyNotStatus st = banker_why_not(&m->current_state,
+                                     m->why_context.pid,
+                                     m->why_context.request,
+                                     &rep,
+                                     NULL,
+                                     NULL);
+    if (out_report) {
+        *out_report = rep;
+    }
+    return st;
 }
 
 void gui_model_get_current_need(const GuiModel *m, int need[BANKER_MAX_PROCS][BANKER_MAX_RES]) {

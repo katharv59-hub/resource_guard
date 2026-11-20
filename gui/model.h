@@ -40,6 +40,18 @@ typedef struct {
     void *user_data;
 } GuiModelObserver;
 
+/* Rejection diagnostic context capturing the exact conditions of an unsafe denial */
+typedef struct {
+    bool has_rejected_request;
+    int pid;
+    int request[BANKER_MAX_RES];
+    uint64_t state_version;         /* Version of model at time of rejection */
+    BankerState snapshot_state;     /* Immutable snapshot of BankerState when rejected */
+    WhyNotReport report;           /* Authoritative analysis report */
+    WhyNotStatus status;           /* Status returned by banker_why_not */
+    bool analyzed;                 /* Whether analysis has been executed */
+} GuiWhyNotContext;
+
 struct GuiModel {
     /* Authoritative committed state */
     BankerState current_state;
@@ -66,6 +78,9 @@ struct GuiModel {
     /* Multi-subscriber observer callbacks */
     GuiModelObserver observers[GUI_MODEL_MAX_OBSERVERS];
     int observer_count;
+
+    /* Rejection intelligence context */
+    GuiWhyNotContext why_context;
 };
 
 /* Lifecycle */
@@ -99,6 +114,14 @@ bool gui_model_commit_draft(GuiModel *m);
 
 /* Transactional resource request */
 RequestResult gui_model_submit_request(GuiModel *m, int pid, const int req[], Trace *trace);
+
+/* Why-not Diagnostic Intelligence */
+void gui_model_clear_why_not(GuiModel *m);
+bool gui_model_has_why_not(const GuiModel *m);
+bool gui_model_get_why_not_context(const GuiModel *m, GuiWhyNotContext *out);
+bool gui_model_is_why_not_stale(const GuiModel *m);
+WhyNotStatus gui_model_run_why_not(GuiModel *m, BankerWhyVisitor visitor, void *user_data);
+WhyNotStatus gui_model_reevaluate_why_not(GuiModel *m, WhyNotReport *out_report);
 
 /* Queries */
 void gui_model_get_current_need(const GuiModel *m, int need[BANKER_MAX_PROCS][BANKER_MAX_RES]);
