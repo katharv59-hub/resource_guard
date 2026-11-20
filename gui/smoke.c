@@ -871,13 +871,13 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Return to whynot page to test re-evaluation and draft warnings */
+    /* Uncommitted draft test: edit draft in Resources and navigate to Why-not */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "resources");
+    process_pending_events();
+    gui_model_set_draft_available(model, 0, 99);
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
     process_pending_events();
 
-    /* Uncommitted draft test */
-    gui_model_set_draft_available(model, 0, 99);
-    process_pending_events();
     if (!gtk_widget_get_visible(ww->banner_draft)) {
         fprintf(stderr, "FAIL: Draft warning banner hidden when uncommitted draft exists.\n");
         gtk_window_destroy(GTK_WINDOW(win));
@@ -891,7 +891,11 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
     gui_model_init_draft_from_current(model);
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "resources");
     process_pending_events();
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "whynot");
+    process_pending_events();
+
     if (gtk_widget_get_visible(ww->banner_draft)) {
         fprintf(stderr, "FAIL: Draft warning banner visible after discarding draft.\n");
         gtk_window_destroy(GTK_WINDOW(win));
