@@ -750,9 +750,11 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
+    char expected_ver[64];
+    snprintf(expected_ver, sizeof(expected_ver), "v%lu", (unsigned long)ctx_after_nav.state_version);
     const char *badge_ver_txt = gtk_label_get_text(GTK_LABEL(ww->badge_version));
-    if (!strstr(badge_ver_txt, "v1")) {
-        fprintf(stderr, "FAIL: Expected badge_version to contain 'v1', got '%s'.\n", badge_ver_txt);
+    if (!strstr(badge_ver_txt, expected_ver)) {
+        fprintf(stderr, "FAIL: Expected badge_version to contain '%s', got '%s'.\n", expected_ver, badge_ver_txt);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
@@ -1012,8 +1014,11 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
+    char expected_cap_ver[64], expected_cur_ver[64];
+    snprintf(expected_cap_ver, sizeof(expected_cap_ver), "State v%lu", (unsigned long)ctx_after_nav.state_version);
+    snprintf(expected_cur_ver, sizeof(expected_cur_ver), "Current State is v%lu", (unsigned long)model->state_version);
     const char *stale_txt = gtk_label_get_text(GTK_LABEL(ww->label_stale));
-    if (!strstr(stale_txt, "Historical Diagnostic") || !strstr(stale_txt, "State v1") || !strstr(stale_txt, "Current State is v2")) {
+    if (!strstr(stale_txt, "Historical Diagnostic") || !strstr(stale_txt, expected_cap_ver) || !strstr(stale_txt, expected_cur_ver)) {
         fprintf(stderr, "FAIL: Historical banner text did not report version divergence (got '%s').\n", stale_txt);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);

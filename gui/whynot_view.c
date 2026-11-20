@@ -326,7 +326,7 @@ static void whynot_refresh(WhynotWidgets *w) {
             format_vec(tr->final_work, trial.m, final_work_str, sizeof(final_work_str));
             format_vec(deficit_i, trial.m, deficit_i_str, sizeof(deficit_i_str));
 
-            char detail_buf[512];
+            char detail_buf[1024];
             snprintf(detail_buf, sizeof(detail_buf),
                      "Alloc: %s   Need: %s   Final Work: %s   Deficit: %s%s",
                      alloc_i_str, need_i_str, final_work_str, deficit_i_str,
