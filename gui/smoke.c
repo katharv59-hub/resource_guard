@@ -750,11 +750,11 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         g_object_unref(app);
         return 1;
     }
-    char expected_ver[64];
-    snprintf(expected_ver, sizeof(expected_ver), "v%lu", (unsigned long)ctx_after_nav.state_version);
+    char expected_why_ver[64];
+    snprintf(expected_why_ver, sizeof(expected_why_ver), "v%lu", (unsigned long)ctx_after_nav.state_version);
     const char *badge_ver_txt = gtk_label_get_text(GTK_LABEL(ww->badge_version));
-    if (!strstr(badge_ver_txt, expected_ver)) {
-        fprintf(stderr, "FAIL: Expected badge_version to contain '%s', got '%s'.\n", expected_ver, badge_ver_txt);
+    if (!strstr(badge_ver_txt, expected_why_ver)) {
+        fprintf(stderr, "FAIL: Expected badge_version to contain '%s', got '%s'.\n", expected_why_ver, badge_ver_txt);
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
