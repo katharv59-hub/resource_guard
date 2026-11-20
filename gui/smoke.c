@@ -1359,9 +1359,10 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
 
     /* Phase 3.1: Test Re-evaluation Assertion 3: WHY_ERR_UNAVAILABLE */
-    /* Reduce Available R1 so that P0's rejected request of 3 exceeds current Available */
-    gui_model_set_draft_total(model, 1, model->draft_state.total[1] - 2);
-    gui_model_set_draft_available(model, 1, model->draft_state.available[1] - 2);
+    /* Set P1 alloc R1 = 2 and auto-calculate Available (Available R1 becomes 1 < request 3) */
+    gui_model_init_draft_from_current(model);
+    gui_model_set_draft_alloc(model, 1, 1, 2);
+    gui_model_auto_calculate_draft_available(model);
     if (!gui_model_commit_draft(model)) {
         fprintf(stderr, "FAIL: Failed to commit draft reducing Available R1.\n");
         gtk_window_destroy(GTK_WINDOW(win));
@@ -1401,9 +1402,10 @@ int gui_smoke_test_main(int argc, char *argv[]) {
 
     /* Phase 3.1: Test Re-evaluation Assertion 4: WHY_ERR_EXCEEDS_NEED */
     /* Set P0 Max R1 = 2 (Alloc=1 => Need=1 < request=3) with high available */
+    gui_model_init_draft_from_current(model);
     gui_model_set_draft_max(model, 0, 1, 2);
-    gui_model_set_draft_total(model, 1, 15);
-    gui_model_set_draft_available(model, 1, 8);
+    gui_model_set_draft_total(model, 1, 10);
+    gui_model_auto_calculate_draft_available(model);
     if (!gui_model_commit_draft(model)) {
         fprintf(stderr, "FAIL: Failed to commit draft for WHY_ERR_EXCEEDS_NEED.\n");
         gtk_window_destroy(GTK_WINDOW(win));
@@ -1443,11 +1445,12 @@ int gui_smoke_test_main(int argc, char *argv[]) {
 
     /* Phase 3.1: Test Re-evaluation Assertion 5: WHY_ERR_NOT_UNSAFE */
     /* Restore P0 Max R1 to 4 and provide plenty of resources so request is safe */
+    gui_model_init_draft_from_current(model);
     gui_model_set_draft_max(model, 0, 1, 4);
     for (int j = 0; j < model->draft_state.m; j++) {
         gui_model_set_draft_total(model, j, model->draft_state.total[j] + 50);
-        gui_model_set_draft_available(model, j, model->draft_state.available[j] + 50);
     }
+    gui_model_auto_calculate_draft_available(model);
     if (!gui_model_commit_draft(model)) {
         fprintf(stderr, "FAIL: Failed to commit generous resources for WHY_ERR_NOT_UNSAFE.\n");
         gtk_window_destroy(GTK_WINDOW(win));
@@ -1486,6 +1489,7 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
 
     /* Phase 3.1: Dimensional Mismatch Handling */
+    gui_model_init_draft_from_current(model);
     gui_model_set_draft_dimensions(model, model->draft_state.n, 2);
     gui_model_auto_calculate_draft_available(model);
     if (!gui_model_commit_draft(model)) {
