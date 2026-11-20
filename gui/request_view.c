@@ -126,6 +126,35 @@ static void on_btn_clear_clicked(GtkWidget *btn, gpointer user_data) {
     }
 }
 
+static void on_btn_explain_rejection_clicked(GtkWidget *btn, gpointer user_data) {
+    (void)btn;
+    SimulatorWidgets *w = (SimulatorWidgets *)user_data;
+    if (!w || !w->window) return;
+    gui_window_switch_to_page(w->window, "whynot");
+}
+
+static void update_explain_button_visibility(SimulatorWidgets *w) {
+    if (!w || !w->btn_explain_rejection) return;
+    if (!w->model || !w->model->is_loaded) {
+        gtk_widget_set_visible(w->btn_explain_rejection, FALSE);
+        return;
+    }
+
+    bool has_why = gui_model_has_why_not(w->model);
+    gtk_widget_set_visible(w->btn_explain_rejection, has_why ? TRUE : FALSE);
+
+    if (has_why) {
+        bool is_stale = gui_model_is_why_not_stale(w->model);
+        if (is_stale) {
+            gtk_button_set_label(GTK_BUTTON(w->btn_explain_rejection),
+                                 "Explain Rejection in Why-not Intelligence (Historical) \xe2\x86\x92");
+        } else {
+            gtk_button_set_label(GTK_BUTTON(w->btn_explain_rejection),
+                                 "Explain Rejection in Why-not Intelligence \xe2\x86\x92");
+        }
+    }
+}
+
 static void display_result(SimulatorWidgets *w, RequestResult res, int pid, const int req[], const Trace *trace) {
     if (!w || !w->model) return;
 
@@ -382,6 +411,8 @@ static void display_result(SimulatorWidgets *w, RequestResult res, int pid, cons
         default:
             break;
     }
+
+    update_explain_button_visibility(w);
 }
 
 static void on_btn_submit_clicked(GtkWidget *btn, gpointer user_data) {
@@ -405,6 +436,7 @@ static void on_btn_submit_clicked(GtkWidget *btn, gpointer user_data) {
 
     display_result(w, res, pid, req, &tr);
     update_process_context(w);
+    update_explain_button_visibility(w);
 }
 
 static void simulator_refresh(SimulatorWidgets *w) {
@@ -496,6 +528,7 @@ static void simulator_refresh(SimulatorWidgets *w) {
     }
 
     update_process_context(w);
+    update_explain_button_visibility(w);
 }
 
 static void on_sim_model_changed(GuiModel *m, void *user_data) {
@@ -664,6 +697,15 @@ GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window) {
 
     w->box_result_details = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_box_append(GTK_BOX(w->card_result), w->box_result_details);
+
+    w->btn_explain_rejection = gtk_button_new_with_label("Explain Rejection in Why-not Intelligence \xe2\x86\x92");
+    gtk_widget_add_css_class(w->btn_explain_rejection, "primary");
+    gtk_widget_set_margin_top(w->btn_explain_rejection, 10);
+    gtk_widget_set_halign(w->btn_explain_rejection, GTK_ALIGN_START);
+    gtk_widget_set_visible(w->btn_explain_rejection, FALSE);
+    g_signal_connect(w->btn_explain_rejection, "clicked",
+                     G_CALLBACK(on_btn_explain_rejection_clicked), w);
+    gtk_box_append(GTK_BOX(w->card_result), w->btn_explain_rejection);
 
     gtk_widget_set_visible(w->card_result, FALSE);
     gtk_box_append(GTK_BOX(w->content_box), w->card_result);

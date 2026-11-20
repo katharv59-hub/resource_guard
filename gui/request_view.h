@@ -47,6 +47,7 @@ typedef struct {
     GtkWidget *label_result_title;
     GtkWidget *label_result_desc;
     GtkWidget *box_result_details;
+    GtkWidget *btn_explain_rejection;
 } SimulatorWidgets;
 
 GtkWidget *gui_page_simulator_create(GuiModel *model, GtkWidget *window);

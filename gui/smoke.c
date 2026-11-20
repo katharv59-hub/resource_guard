@@ -362,7 +362,14 @@ int gui_smoke_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* 1. Process selection */
+    /* 1. Process selection & verify Explain Rejection button initially hidden */
+    if (gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button unexpectedly visible on initial startup.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
     gtk_drop_down_set_selected(GTK_DROP_DOWN(rw->dropdown_proc), 1);
     process_pending_events();
 
@@ -574,6 +581,153 @@ int gui_smoke_test_main(int argc, char *argv[]) {
     }
     if (memcmp(&model->original_state, &orig_before_unsafe, sizeof(BankerState)) != 0) {
         fprintf(stderr, "FAIL: Original scenario baseline was modified on REQ_DENIED_UNSAFE!\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* 7b. Why-not Intelligence Explain Rejection button interaction & lifecycle verification */
+    if (!gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button not visible after REQ_DENIED_UNSAFE.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    GuiWhyNotContext why_ctx;
+    if (!gui_model_get_why_not_context(model, &why_ctx) || why_ctx.pid != 4 ||
+        why_ctx.request[0] != 3 || why_ctx.request[1] != 3 || why_ctx.request[2] != 0) {
+        fprintf(stderr, "FAIL: Model Why-not context not captured properly for P4 [3, 3, 0].\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Click Explain Rejection button and verify navigation to 'whynot' stack page */
+    g_signal_emit_by_name(rw->btn_explain_rejection, "clicked");
+    process_pending_events();
+
+    const char *cur_page = gtk_stack_get_visible_child_name(GTK_STACK(stack));
+    if (!cur_page || strcmp(cur_page, "whynot") != 0) {
+        fprintf(stderr, "FAIL: Explain Rejection button did not navigate to 'whynot' page (got '%s').\n",
+                cur_page ? cur_page : "<null>");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Return to simulator */
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "simulator");
+    process_pending_events();
+
+    /* Submit second unsafe request: P0 asks [0, 3, 0] (Need is [7, 4, 3], Avail is [3, 3, 2]; trial avail [3, 0, 2] -> unsafe) */
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(rw->dropdown_proc), 0);
+    process_pending_events();
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[0]), 0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[1]), 3);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[2]), 0);
+
+    g_signal_emit_by_name(rw->btn_submit, "clicked");
+    process_pending_events();
+
+    if (strcmp(gtk_label_get_text(GTK_LABEL(rw->badge_result_code)), "REQ_DENIED_UNSAFE") != 0) {
+        fprintf(stderr, "FAIL: Expected REQ_DENIED_UNSAFE for P0 request [0, 3, 0].\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gui_model_get_why_not_context(model, &why_ctx) || why_ctx.pid != 0 ||
+        why_ctx.request[0] != 0 || why_ctx.request[1] != 3 || why_ctx.request[2] != 0) {
+        fprintf(stderr, "FAIL: Why-not context was not replaced with second unsafe request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button lost visibility after second unsafe request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Submit wait-unavailable request: P0 asks [4, 0, 0] (<= Need [7, 4, 3], > Available [3, 3, 2]) */
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[0]), 4);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[1]), 0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[2]), 0);
+
+    g_signal_emit_by_name(rw->btn_submit, "clicked");
+    process_pending_events();
+
+    if (strcmp(gtk_label_get_text(GTK_LABEL(rw->badge_result_code)), "REQ_WAIT_UNAVAILABLE") != 0) {
+        fprintf(stderr, "FAIL: Expected REQ_WAIT_UNAVAILABLE for P0 request [4, 0, 0].\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    /* Existing rejection context must remain intact */
+    if (!gui_model_get_why_not_context(model, &why_ctx) || why_ctx.pid != 0 ||
+        why_ctx.request[0] != 0 || why_ctx.request[1] != 3 || why_ctx.request[2] != 0) {
+        fprintf(stderr, "FAIL: Why-not context was corrupted by wait-unavailable request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button lost visibility after wait-unavailable request.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Submit a granted request: P1 asks [1, 0, 2] */
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(rw->dropdown_proc), 1);
+    process_pending_events();
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[0]), 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[1]), 0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(rw->spin_req[2]), 2);
+
+    g_signal_emit_by_name(rw->btn_submit, "clicked");
+    process_pending_events();
+
+    if (strcmp(gtk_label_get_text(GTK_LABEL(rw->badge_result_code)), "REQ_GRANTED") != 0) {
+        fprintf(stderr, "FAIL: Expected REQ_GRANTED for P1 request [1, 0, 2].\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    /* Context remains available but is marked historical */
+    if (!gui_model_has_why_not(model) || !gui_model_is_why_not_stale(model)) {
+        fprintf(stderr, "FAIL: Why-not context missing or not marked historical after state advancement.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (!gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button lost visibility after state advancement.\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    const char *btn_text = gtk_button_get_label(GTK_BUTTON(rw->btn_explain_rejection));
+    if (!strstr(btn_text, "Historical")) {
+        fprintf(stderr, "FAIL: Explain Rejection button label does not contain 'Historical' (got '%s').\n", btn_text);
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+
+    /* Reset baseline and verify button becomes hidden */
+    gui_model_reset_to_original(model);
+    process_pending_events();
+
+    if (gui_model_has_why_not(model)) {
+        fprintf(stderr, "FAIL: Why-not context not cleared after gui_model_reset_to_original().\n");
+        gtk_window_destroy(GTK_WINDOW(win));
+        g_object_unref(app);
+        return 1;
+    }
+    if (gtk_widget_get_visible(rw->btn_explain_rejection)) {
+        fprintf(stderr, "FAIL: Explain Rejection button unexpectedly visible after baseline reset.\n");
         gtk_window_destroy(GTK_WINDOW(win));
         g_object_unref(app);
         return 1;
