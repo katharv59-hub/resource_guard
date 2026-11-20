@@ -329,6 +329,7 @@ void gui_model_load_demo(GuiModel *m) {
     m->draft_state = s;
     m->is_loaded = true;
 
+    gui_model_clear_why_not(m);
     gui_model_validate_draft(m);
     notify_change(m);
 }
@@ -680,6 +681,11 @@ WhyNotStatus gui_model_run_why_not(GuiModel *m, BankerWhyVisitor visitor, void *
 
 WhyNotStatus gui_model_reevaluate_why_not(GuiModel *m, WhyNotReport *out_report) {
     if (!m || !m->is_loaded || !m->why_context.has_rejected_request) {
+        return WHY_ERR_BAD_STATE;
+    }
+
+    /* Disallow re-evaluation if there is an uncommitted draft conflicting with current state */
+    if (gui_model_has_uncommitted_draft(m)) {
         return WHY_ERR_BAD_STATE;
     }
 

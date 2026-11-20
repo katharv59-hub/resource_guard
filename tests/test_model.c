@@ -1208,9 +1208,21 @@ static void test_why_not_rejection_capture_and_immutability(void) {
            ctx.report.denial_trace.final_work[1] == 0 &&
            ctx.report.denial_trace.final_work[2] == 2);
 
-    /* Immutability check: mutate m.draft_state; snapshot in context must NOT change */
-    m.draft_state.available[0] = 999;
-    assert(ctx.snapshot_state.available[0] == 3);
+    /* Save the original captured snapshot and state version */
+    BankerState original_snapshot = ctx.snapshot_state;
+    uint64_t original_v = ctx.state_version;
+
+    /* Perform a legitimate committed state mutation via a granted request */
+    int safe_req[BANKER_MAX_RES] = {1, 0, 2};
+    assert(gui_model_submit_request(&m, 1, safe_req, NULL) == REQ_GRANTED);
+    assert(m.state_version == original_v + 1);
+
+    /* Retrieve GuiWhyNotContext again from the model to verify storage immutability */
+    GuiWhyNotContext ctx2;
+    assert(gui_model_get_why_not_context(&m, &ctx2));
+    assert(memcmp(&ctx2.snapshot_state, &original_snapshot, sizeof(BankerState)) == 0);
+    assert(ctx2.state_version == original_v);
+    assert(gui_model_is_why_not_stale(&m));
 
     printf("  -> Passed (exact PID, vector, snapshot, trace, and alternatives verified).\n");
     fflush(stdout);
@@ -1314,7 +1326,15 @@ static void test_why_not_lifecycle_clearing(void) {
     assert(gui_model_load_scenario(&m, "tests/scenarios/demo.txt", err, sizeof(err)));
     assert(!gui_model_has_why_not(&m));
 
-    printf("  -> Passed (why_not context safely cleared on reset and scenario load).\n");
+    /* Re-trigger rejection and test demo reload clearing */
+    assert(gui_model_submit_request(&m, 4, req, NULL) == REQ_DENIED_UNSAFE);
+    assert(gui_model_has_why_not(&m));
+
+    /* Reloading the demo baseline must clear why_not context */
+    gui_model_load_demo(&m);
+    assert(!gui_model_has_why_not(&m));
+
+    printf("  -> Passed (why_not context safely cleared on reset, scenario load, and demo reload).\n");
     fflush(stdout);
 }
 
@@ -1334,6 +1354,16 @@ static void test_why_not_reevaluate_semantics(void) {
     WhyNotReport rep;
     assert(gui_model_reevaluate_why_not(&m, &rep) == WHY_OK);
     assert(rep.candidate_count == 32);
+
+    /* 1b. Test uncommitted draft blocks re-evaluation with WHY_ERR_BAD_STATE */
+    gui_model_set_draft_available(&m, 0, 99);
+    assert(gui_model_has_uncommitted_draft(&m));
+    assert(gui_model_reevaluate_why_not(&m, &rep) == WHY_ERR_BAD_STATE);
+
+    /* Discard uncommitted draft -> re-evaluation allowed again */
+    gui_model_init_draft_from_current(&m);
+    assert(!gui_model_has_uncommitted_draft(&m));
+    assert(gui_model_reevaluate_why_not(&m, &rep) == WHY_OK);
 
     /* 2. Grant request to P1: [1, 0, 2] -> available drops to [2, 3, 0] */
     int req_p1[BANKER_MAX_RES] = {1, 0, 2};
